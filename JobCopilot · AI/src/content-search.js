@@ -7,6 +7,34 @@
 
   function getCards() { return Array.from(document.querySelectorAll(SELECTORS.jobs.jobCard)); }
 
+  function getScrollContainers() {
+    const selectors = [
+      '.job-list-container', '.job-list-box', '.job-list',
+      '.search-job-list', '[class*="job-list"]', '[class*="job-scroll"]'
+    ];
+    const found = [];
+    for (const selector of selectors) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (el.scrollHeight > el.clientHeight + 20 && !found.includes(el)) found.push(el);
+      }
+    }
+    return found;
+  }
+
+  async function loadMoreJobs() {
+    const before = getCards().length;
+    const containers = getScrollContainers();
+    if (containers.length) {
+      for (const el of containers) el.scrollTop = el.scrollHeight;
+      containers[0].dispatchEvent(new Event('scroll', { bubbles: true }));
+    } else {
+      window.scrollTo(0, document.body.scrollHeight);
+      window.dispatchEvent(new Event('scroll'));
+    }
+    await sleep(1500);
+    return getCards().length > before;
+  }
+
   function parseCard(card) {
     const nameEl = card.querySelector(SELECTORS.jobs.jobName);
     const salEl = card.querySelector(SELECTORS.jobs.jobSalary);
@@ -32,19 +60,25 @@
     const seen = {};
     const jobs = [];
     let stall = 0;
-    for (let loop = 0; loop < 40 && jobs.length < count && stall < 4; loop++) {
+    let lastSignature = '';
+    // BOSS uses virtualized/infinite lists. Keep trying while the DOM is unchanged,
+    // but allow enough time for lazy loading and pagination to complete.
+    for (let loop = 0; loop < 80 && jobs.length < count && stall < 10; loop++) {
       const cards = getCards();
       let added = 0;
       for (const c of cards) {
         const j = parseCard(c);
         if (j.id && !seen[j.id]) { seen[j.id] = 1; jobs.push(j); added++; if (jobs.length >= count) break; }
       }
-      if (added === 0) stall++; else stall = 0;
+      const signature = cards.map(c => {
+        const n = c.querySelector(SELECTORS.jobs.jobName);
+        return n ? n.textContent.trim() : '';
+      }).join('|');
+      if (added === 0 && signature === lastSignature) stall++; else stall = 0;
+      lastSignature = signature;
       if (jobs.length >= count) break;
-      window.scrollTo(0, document.body.scrollHeight);
-      const container = document.querySelector('.job-list-container, .job-list-box, [class*="job-list"]');
-      if (container) container.scrollTop = container.scrollHeight;
-      await sleep(1200);
+      const loaded = await loadMoreJobs();
+      if (!loaded && added === 0) await sleep(1000);
     }
     return jobs.slice(0, count);
   }
