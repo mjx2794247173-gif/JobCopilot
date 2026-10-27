@@ -56,7 +56,17 @@
     };
   }
 
-  async function scrape(count) {
+  function salaryFloorK(text) {
+    const s = (text || '').replace(/,/g, '').toLowerCase();
+    if (!s || /面议|面谈|不限/.test(s)) return null;
+    const nums = s.match(/\d+(?:\.\d+)?/g);
+    if (!nums || !nums.length) return null;
+    const value = Number(nums[0]);
+    if (!Number.isFinite(value)) return null;
+    return /万/.test(s) ? value * 10 : value;
+  }
+
+  async function scrape(count, minSalary) {
     const seen = {};
     const jobs = [];
     let stall = 0;
@@ -68,7 +78,9 @@
       let added = 0;
       for (const c of cards) {
         const j = parseCard(c);
-        if (j.id && !seen[j.id]) { seen[j.id] = 1; jobs.push(j); added++; if (jobs.length >= count) break; }
+        const floor = salaryFloorK(j.salary);
+        const salaryOk = !minSalary || floor === null || floor >= minSalary;
+        if (j.id && salaryOk && !seen[j.id]) { seen[j.id] = 1; jobs.push(j); added++; if (jobs.length >= count) break; }
       }
       const signature = cards.map(c => {
         const n = c.querySelector(SELECTORS.jobs.jobName);
@@ -155,7 +167,7 @@
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SCRAPE') {
-      scrape(msg.count || 20).then(jobs => sendResponse({ success: true, jobs: jobs })).catch(e => sendResponse({ success: false, error: e.message }));
+      scrape(msg.count || 20, Number(msg.minSalary) || 0).then(jobs => sendResponse({ success: true, jobs: jobs })).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
     if (msg.type === 'OPEN_JD') {

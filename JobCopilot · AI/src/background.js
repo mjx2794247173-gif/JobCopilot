@@ -24,7 +24,7 @@ function log(text, level) { chrome.runtime.sendMessage({ type: 'LOG', text: text
 function pushPhase() { chrome.runtime.sendMessage({ type: 'PHASE', phase: state.phase }).catch(() => {}); }
 function progress(cur, total, label) { chrome.runtime.sendMessage({ type: 'PROGRESS', cur: cur, total: total, label: label || '' }).catch(() => {}); }
 async function waitIfPaused() { while (state.paused && !state.aborted) await sleep(400); }
-function getCfg() { return chrome.storage.local.get(['dsKey', 'resumeText', 'resumeImage', 'city', 'keyword', 'count']); }
+function getCfg() { return chrome.storage.local.get(['dsKey', 'resumeText', 'resumeImage', 'city', 'keyword', 'minSalary', 'count']); }
 function resumeFull(cfg) { return (cfg.resumeText || '').trim(); }
 function jobInfo(j) { return '岗位：' + (j.name || '') + '\n技能标签：' + ((j.tags || []).join('、')) + '\n薪资：' + (j.salary || '') + '\n公司：' + (j.company || ''); }
 function findJob(id) { for (var i = 0; i < state.jobs.length; i++) if (state.jobs[i].id === id) return state.jobs[i]; return null; }
@@ -137,7 +137,9 @@ async function runCollect() {
 
   log('收集岗位中（目标 ' + count + ' 个）...');
   if (!await ensureInjected(tab.id, 'src/content-search.js')) { state.phase = 'idle'; pushPhase(); return; }
-  const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count });
+  const minSalary = Number(cfg.minSalary) || 0;
+  if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
+  const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary });
   if (!r || !r.success) { log('收集失败：' + (r && r.error), 'error'); state.phase = 'idle'; pushPhase(); return; }
   state.jobs = r.jobs || [];
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
