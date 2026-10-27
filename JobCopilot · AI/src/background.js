@@ -2,6 +2,8 @@
 importScripts('/src/selectors.js'); // 让 SW 也能用 CITY_MAP（否则城市永远是全国）
 const DS_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions';
 const DS_MODEL = 'deepseek-chat';
+const DS_TIMEOUT_MS = 30000;
+const DS_RETRIES = 2;
 
 const RESUME_TEXT = ''; // 不内置任何个人简历，由用户在设置页"简历文字"填写
 
@@ -31,14 +33,26 @@ function findJob(id) { for (var i = 0; i < state.jobs.length; i++) if (state.job
 async function callDS(messages, maxTokens) {
   const cfg = await getCfg();
   if (!cfg.dsKey) throw new Error('未配置DeepSeek API Key');
-  const resp = await fetch(DS_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.dsKey },
-    body: JSON.stringify({ model: DS_MODEL, messages: messages, max_tokens: maxTokens || 500, temperature: 0.5 })
-  });
-  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('DeepSeek ' + resp.status + ': ' + t.slice(0, 120)); }
-  const data = await resp.json();
-  return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+  let lastError;
+  for (let attempt = 0; attempt <= DS_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DS_TIMEOUT_MS);
+    try {
+      const resp = await fetch(DS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.dsKey },
+        signal: controller.signal,
+        body: JSON.stringify({ model: DS_MODEL, messages: messages, max_tokens: maxTokens || 500, temperature: 0.5 })
+      });
+      if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('DeepSeek ' + resp.status + ': ' + t.slice(0, 160)); }
+      const data = await resp.json();
+      return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    } catch (e) {
+      lastError = e.name === 'AbortError' ? new Error('DeepSeek 请求超时') : e;
+      if (attempt < DS_RETRIES) await sleep(1000 * (attempt + 1));
+    } finally { clearTimeout(timer); }
+  }
+  throw lastError || new Error('DeepSeek 请求失败');
 }
 
 // 筛选：只判断是否值得投（用岗位标签快速判断，不生成招呼语）
@@ -63,7 +77,8 @@ async function genGreetingFromJD(cfg, job, jd) {
 
 // ── tab 注入 + 发消息 ──
 async function ensureInjected(tabId, file) {
-  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['src/selectors.js', file] }); } catch (e) {}
+  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['src/selectors.js', file] }); return true; }
+  catch (e) { log('页面脚本注入失败：' + e.message, 'error'); return false; }
 }
 function sendToTab(tabId, msg) {
   return new Promise((resolve) => {
@@ -105,6 +120,7 @@ function curUrl(tabId) { return new Promise(res => chrome.tabs.get(tabId, t => r
 
 // ── 流程：收集 + 筛选 ──
 async function runCollect() {
+  if (state.phase === 'collecting' || state.phase === 'screening' || state.phase === 'delivering') { log('已有任务正在运行', 'warn'); return; }
   state.aborted = false; state.paused = false;
   state.jobs = []; state.screened = []; state.greetings = {}; state.results = [];
   state.phase = 'collecting'; pushPhase();
@@ -120,12 +136,12 @@ async function runCollect() {
   const count = parseInt(cfg.count) || 20;
 
   log('收集岗位中（目标 ' + count + ' 个）...');
-  await ensureInjected(tab.id, 'src/content-search.js');
+  if (!await ensureInjected(tab.id, 'src/content-search.js')) { state.phase = 'idle'; pushPhase(); return; }
   const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count });
   if (!r || !r.success) { log('收集失败：' + (r && r.error), 'error'); state.phase = 'idle'; pushPhase(); return; }
   state.jobs = r.jobs || [];
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
-  if (!state.jobs.length) { state.phase = 'idle'; pushPhase(); return; }
+  if (!state.jobs.length) { log('未收集到岗位，请放宽关键词/城市或刷新 BOSS 页面', 'warn'); state.phase = 'idle'; pushPhase(); return; }
 
   // 筛选（并发3）
   state.phase = 'screening'; pushPhase();
@@ -173,7 +189,7 @@ async function runDeliver(jobIds) {
 
     // 1. 回搜索页，点开卡片读取该岗位完整JD
     const tab = await ensureTab(searchUrl);
-    await ensureInjected(tab.id, 'src/content-search.js');
+    if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
     const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
     const jd = (jdr && jdr.jd) || '';
