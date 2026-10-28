@@ -157,52 +157,6 @@ async function ensureTab(url) {
 async function getSearchTab(cfg) { return ensureTab(buildSearchUrl(cfg)); }
 function curUrl(tabId) { return new Promise(res => chrome.tabs.get(tabId, t => res((t && t.url) || ''))); }
 
-async function collectAcrossPages(tabId, cfg, count, minSalary) {
-  const jobs = [];
-  const seen = {};
-  let emptyPages = 0;
-  const maxPages = Math.min(50, Math.max(1, Math.ceil(count / 10) + 5));
-
-  for (let page = 1; page <= maxPages && jobs.length < count && !state.aborted; page++) {
-    await waitIfPaused();
-    const url = new URL(buildSearchUrl(cfg));
-    url.searchParams.set('page', String(page));
-    await chrome.tabs.update(tabId, { url: url.toString() });
-    await waitTabComplete(tabId, 30000);
-    await sleep(1200);
-
-    // manifest 会自动注入；再执行一次仅用于兼容扩展刚重载的旧标签页。
-    await ensureInjected(tabId, 'src/content-search.js');
-    let result = await sendToTab(tabId, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
-    if (!result || !result.success) {
-      await sleep(1000);
-      await ensureInjected(tabId, 'src/content-search.js');
-      result = await sendToTab(tabId, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
-    }
-    if (!result || !result.success) {
-      log('第 ' + page + ' 页读取失败，自动跳过', 'warn');
-      emptyPages++;
-      if (emptyPages >= 3) break;
-      continue;
-    }
-
-    let added = 0;
-    for (const job of (result.jobs || [])) {
-      if (!job.id || seen[job.id]) continue;
-      seen[job.id] = true;
-      jobs.push(job);
-      added++;
-      if (jobs.length >= count) break;
-    }
-    progress(jobs.length, count, '收集');
-    log('收集第 ' + page + ' 页：新增 ' + added + '，累计 ' + jobs.length + '/' + count);
-    emptyPages = added ? 0 : emptyPages + 1;
-    if (emptyPages >= 3) break;
-    await rand(700, 1300);
-  }
-  return jobs.slice(0, count);
-}
-
 // ── 流程：收集 + 筛选 ──
 async function runCollect() {
   if (state.phase === 'collecting' || state.phase === 'screening' || state.phase === 'delivering') { log('已有任务正在运行', 'warn'); return; }
@@ -223,8 +177,14 @@ async function runCollect() {
   log('收集岗位中（目标 ' + count + ' 个）...');
   const minSalary = Number(cfg.minSalary) || 0;
   if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
-  // 每页单独读取并立即返回，由后台负责导航。页面切换不会再打断长消息通道。
-  state.jobs = await collectAcrossPages(tab.id, cfg, count, minSalary);
+  // 在当前搜索页内一次性连续滚动收集，不再由后台逐页刷新。
+  if (!await ensureInjected(tab.id, 'src/content-search.js')) { state.phase = 'idle'; pushPhase(); return; }
+  const collected = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary }, 300000);
+  if (!collected || !collected.success) {
+    log('收集失败：' + ((collected && collected.error) || '页面无响应'), 'error');
+    state.phase = 'idle'; pushPhase(); return;
+  }
+  state.jobs = collected.jobs || [];
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
   if (!state.jobs.length) { log('未收集到岗位，请放宽关键词/城市或刷新 BOSS 页面', 'warn'); state.phase = 'idle'; pushPhase(); return; }
 
