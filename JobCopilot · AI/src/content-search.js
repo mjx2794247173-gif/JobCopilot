@@ -91,11 +91,14 @@
     const linkEl = card.querySelector('a[href*="/job_detail/"]') || card.querySelector('a[ka][href]') || card.querySelector('a');
     const link = linkEl ? linkEl.href : '';
     const m = link.match(/job_detail\/([^.?]+)\.html/);
-    const id = (m && m[1]) || ((nameEl ? nameEl.textContent.trim() : '') + '|' + (salEl ? salEl.textContent.trim() : ''));
+    const companyEl = card.querySelector('.company-name a, .company-name, [class*="company-name"], .boss-info .company-name, .company-info a, [class*="company"] a');
+    const companyText = companyEl ? companyEl.textContent.trim() : '';
+    const id = (m && m[1]) || link || (
+      (nameEl ? nameEl.textContent.trim() : '') + '|' + companyText + '|' + (salEl ? salEl.textContent.trim() : '')
+    );
     const tags = Array.from(card.querySelectorAll(SELECTORS.jobs.tagList)).map(t => t.textContent.trim()).filter(Boolean);
     let company = '';
-    const compEl = card.querySelector('.company-name a, .company-name, [class*="company-name"], .boss-info .company-name, .company-info a, [class*="company"] a');
-    if (compEl) company = compEl.textContent.trim();
+    if (companyEl) company = companyText;
     return {
       id: id,
       name: nameEl ? nameEl.textContent.trim() : '未知岗位',
