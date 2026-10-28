@@ -80,19 +80,26 @@ async function ensureInjected(tabId, file) {
   try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['src/selectors.js', file] }); return true; }
   catch (e) { log('页面脚本注入失败：' + e.message, 'error'); return false; }
 }
-function sendToTab(tabId, msg) {
+function sendToTab(tabId, msg, timeoutMs) {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
+    const timer = setTimeout(() => finish({ success: false, error: '页面响应超时（' + (msg.type || '未知操作') + '）' }), timeoutMs || 15000);
     chrome.tabs.sendMessage(tabId, msg, (resp) => {
-      if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
-      else resolve(resp || { success: false, error: 'no response' });
+      clearTimeout(timer);
+      if (chrome.runtime.lastError) finish({ success: false, error: chrome.runtime.lastError.message });
+      else finish(resp || { success: false, error: '页面无响应' });
     });
   });
 }
-function waitTabComplete(tabId) {
+function waitTabComplete(tabId, timeoutMs) {
   return new Promise((resolve) => {
-    function lis(id, info) { if (id === tabId && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(lis); setTimeout(resolve, 1200); } }
+    let settled = false;
+    const finish = () => { if (!settled) { settled = true; chrome.tabs.onUpdated.removeListener(lis); resolve(); } };
+    function lis(id, info) { if (id === tabId && info.status === 'complete') setTimeout(finish, 1200); }
     chrome.tabs.onUpdated.addListener(lis);
-    chrome.tabs.get(tabId, (t) => { if (t && t.status === 'complete') { chrome.tabs.onUpdated.removeListener(lis); setTimeout(resolve, 1200); } });
+    chrome.tabs.get(tabId, (t) => { if (t && t.status === 'complete') setTimeout(finish, 1200); });
+    setTimeout(finish, timeoutMs || 25000);
   });
 }
 function resolveCity(cfg) {
@@ -194,6 +201,12 @@ async function runDeliver(jobIds) {
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
     const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
+    if (!jdr || !jdr.success) {
+      recordFail(job, (jdr && jdr.error) || '读取岗位JD失败');
+      log('  读取JD失败，跳过：' + ((jdr && jdr.error) || '未知错误'), 'warn');
+      progress(k + 1, ids.length, '投递');
+      continue;
+    }
     const jd = (jdr && jdr.jd) || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
