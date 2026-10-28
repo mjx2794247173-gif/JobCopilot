@@ -21,18 +21,53 @@
     return found;
   }
 
+  function cardSignature() {
+    return getCards().map(card => parseCard(card).id).filter(Boolean).join('|');
+  }
+
+  function findNextPageButton() {
+    const selectors = [
+      '.options-pages a:last-child', '.page a.next', '.pagination .next',
+      '[class*="pagination"] [class*="next"]', '[class*="page"] [class*="next"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.offsetParent !== null && !/disabled|disable/.test(el.className || '')) return el;
+    }
+    return Array.from(document.querySelectorAll('a, button')).find(el => {
+      const text = (el.textContent || '').trim();
+      return (text === '下一页' || text === '下页' || text === '>') && el.offsetParent !== null && !el.disabled;
+    }) || null;
+  }
+
   async function loadMoreJobs() {
-    const before = getCards().length;
+    const before = cardSignature();
     const containers = getScrollContainers();
     if (containers.length) {
-      for (const el of containers) el.scrollTop = el.scrollHeight;
-      containers[0].dispatchEvent(new Event('scroll', { bubbles: true }));
+      // 虚拟列表必须分段滚动；直接跳到底会漏掉中间批次。
+      for (const el of containers) {
+        const step = Math.max(500, Math.floor(el.clientHeight * 0.8));
+        el.scrollTop = Math.min(el.scrollTop + step, el.scrollHeight);
+        el.dispatchEvent(new Event('scroll', { bubbles: true }));
+      }
     } else {
-      window.scrollTo(0, document.body.scrollHeight);
+      window.scrollBy(0, Math.max(600, Math.floor(window.innerHeight * 0.8)));
       window.dispatchEvent(new Event('scroll'));
     }
-    await sleep(1500);
-    return getCards().length > before;
+    await sleep(1200);
+    return cardSignature() !== before;
+  }
+
+  async function goNextPage() {
+    const next = findNextPageButton();
+    if (!next) return false;
+    const before = cardSignature();
+    next.click();
+    await sleep(2200);
+    window.scrollTo(0, 0);
+    for (const el of getScrollContainers()) el.scrollTop = 0;
+    await sleep(800);
+    return cardSignature() !== before;
   }
 
   function parseCard(card) {
@@ -83,10 +118,9 @@
     const seen = {};
     const jobs = [];
     let stall = 0;
-    let lastSignature = '';
-    // BOSS uses virtualized/infinite lists. Keep trying while the DOM is unchanged,
-    // but allow enough time for lazy loading and pagination to complete.
-    for (let loop = 0; loop < 80 && jobs.length < count && stall < 10; loop++) {
+    let pages = 1;
+    // 分段遍历虚拟列表；到底后继续翻页，直到达到目标或网站确实没有更多结果。
+    for (let loop = 0; loop < 500 && jobs.length < count; loop++) {
       const cards = getCards();
       let added = 0;
       for (const c of cards) {
@@ -99,15 +133,15 @@
           if (jobs.length >= count) break;
         }
       }
-      const signature = cards.map(c => {
-        const n = c.querySelector(SELECTORS.jobs.jobName);
-        return n ? n.textContent.trim() : '';
-      }).join('|');
-      if (added === 0 && signature === lastSignature) stall++; else stall = 0;
-      lastSignature = signature;
+      if (added > 0) chrome.runtime.sendMessage({ type: 'PROGRESS', cur: jobs.length, total: count, label: '收集' }).catch(() => {});
       if (jobs.length >= count) break;
       const loaded = await loadMoreJobs();
-      if (!loaded && added === 0) await sleep(1000);
+      if (added > 0 || loaded) { stall = 0; continue; }
+      stall++;
+      if (stall < 4) { await sleep(600); continue; }
+      if (pages >= 50 || !await goNextPage()) break;
+      pages++;
+      stall = 0;
     }
     return jobs.slice(0, count);
   }
