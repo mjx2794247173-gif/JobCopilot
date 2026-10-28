@@ -66,6 +66,19 @@
     return /万/.test(s) ? value * 10 : value;
   }
 
+  async function captureJD(card) {
+    card.scrollIntoView({ block: 'center' });
+    card.click();
+    await sleep(900);
+    const det = document.querySelector('.job-detail-box, [class*="job-detail"], .detail-content, .job-detail');
+    let jd = det ? (det.innerText || '').trim() : '';
+    if (!jd) {
+      const secs = document.querySelectorAll('.job-sec-text, [class*="job-sec"], [class*="job-desc"]');
+      jd = Array.from(secs).map(s => (s.innerText || '').trim()).filter(Boolean).join('\n');
+    }
+    return jd.slice(0, 3000);
+  }
+
   async function scrape(count, minSalary) {
     const seen = {};
     const jobs = [];
@@ -80,7 +93,12 @@
         const j = parseCard(c);
         const floor = salaryFloorK(j.salary);
         const salaryOk = !minSalary || floor === null || floor >= minSalary;
-        if (j.id && salaryOk && !seen[j.id]) { seen[j.id] = 1; jobs.push(j); added++; if (jobs.length >= count) break; }
+        if (j.id && salaryOk && !seen[j.id]) {
+          seen[j.id] = 1;
+          try { j.jd = await captureJD(c); } catch (e) { j.jd = ''; }
+          jobs.push(j); added++;
+          if (jobs.length >= count) break;
+        }
       }
       const signature = cards.map(c => {
         const n = c.querySelector(SELECTORS.jobs.jobName);

@@ -34,7 +34,7 @@ function progress(cur, total, label) { chrome.runtime.sendMessage({ type: 'PROGR
 async function waitIfPaused() { while (state.paused && !state.aborted) await sleep(400); }
 function getCfg() { return chrome.storage.local.get(['dsKey', 'resumeText', 'resumeImage', 'city', 'keyword', 'minSalary', 'count']); }
 function resumeFull(cfg) { return (cfg.resumeText || '').trim(); }
-function jobInfo(j) { return '岗位：' + (j.name || '') + '\n技能标签：' + ((j.tags || []).join('、')) + '\n薪资：' + (j.salary || '') + '\n公司：' + (j.company || ''); }
+function jobInfo(j) { return '岗位：' + (j.name || '') + '\n技能标签：' + ((j.tags || []).join('、')) + '\n薪资：' + (j.salary || '') + '\n公司：' + (j.company || '') + '\nJD：' + (j.jd || ''); }
 function findJob(id) { for (var i = 0; i < state.jobs.length; i++) if (state.jobs[i].id === id) return state.jobs[i]; return null; }
 
 // ── DeepSeek ──
@@ -207,18 +207,11 @@ async function runDeliver(jobIds) {
     if (!job) { log('[' + (k + 1) + '/' + ids.length + '] 找不到岗位数据，跳过', 'warn'); continue; }
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
-    // 1. 回搜索页，点开卡片读取该岗位完整JD
+    // 1. JD 已在收集阶段保存，投递阶段不再重新查找岗位卡片。
     const tab = await ensureTab(searchUrl);
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
-    log('  读取岗位JD...');
-    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 15000);
-    if (!jdr || !jdr.success) {
-      recordFail(job, (jdr && jdr.error) || '读取岗位JD失败');
-      log('  读取JD失败，跳过：' + ((jdr && jdr.error) || '未知错误'), 'warn');
-      progress(k + 1, ids.length, '投递');
-      continue;
-    }
-    const jd = jdr.jd || '';
+    const jd = job.jd || '';
+    if (!jd) log('  该岗位未抓到完整JD，将使用岗位标签补充', 'warn');
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
     log('  AI生成专属招呼语...');
