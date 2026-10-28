@@ -77,7 +77,9 @@ async function genGreetingFromJD(cfg, job, jd) {
 
 // ── tab 注入 + 发消息 ──
 async function ensureInjected(tabId, file) {
-  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['src/selectors.js', file] }); return true; }
+  // selectors.js 已由 manifest 的 content_scripts 自动加载；这里不要再次注入，
+  // 否则旧页面中已有的 const SELECTORS 会与重复脚本冲突。
+  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: [file] }); return true; }
   catch (e) { log('页面脚本注入失败：' + e.message, 'error'); return false; }
 }
 function sendToTab(tabId, msg, timeoutMs) {
