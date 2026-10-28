@@ -95,7 +95,6 @@
         const salaryOk = !minSalary || floor === null || floor >= minSalary;
         if (j.id && salaryOk && !seen[j.id]) {
           seen[j.id] = 1;
-          try { j.jd = await captureJD(c); } catch (e) { j.jd = ''; }
           jobs.push(j); added++;
           if (jobs.length >= count) break;
         }

@@ -162,7 +162,7 @@ async function runCollect() {
   if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
   // 收集岗位需要滚动加载，200 个岗位可能超过 15 秒；单独给抓取任务更长超时。
   // 收集阶段还会逐个读取并保存 JD；大批量岗位可能超过 5 分钟。
-  const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary }, 900000);
+  const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary }, 300000);
   if (!r || !r.success) { log('收集失败：' + (r && r.error), 'error'); state.phase = 'idle'; pushPhase(); return; }
   state.jobs = r.jobs || [];
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
@@ -212,11 +212,18 @@ async function runDeliver(jobIds) {
     if (!job) { log('[' + (k + 1) + '/' + ids.length + '] 找不到岗位数据，跳过', 'warn'); continue; }
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
-    // 1. JD 已在收集阶段保存，投递阶段不再重新查找岗位卡片。
+    // 1. 先打开目标岗位卡片，读取完整 JD。
     const tab = await ensureTab(searchUrl);
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
-    const jd = job.jd || '';
-    if (!jd) log('  该岗位未抓到完整JD，将使用岗位标签补充', 'warn');
+    log('  读取岗位JD...');
+    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 15000);
+    if (!jdr || !jdr.success) {
+      recordFail(job, (jdr && jdr.error) || '读取岗位JD失败');
+      log('  读取JD失败，跳过：' + ((jdr && jdr.error) || '未知错误'), 'warn');
+      progress(k + 1, ids.length, '投递');
+      continue;
+    }
+    const jd = jdr.jd || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
     log('  AI生成专属招呼语...');
