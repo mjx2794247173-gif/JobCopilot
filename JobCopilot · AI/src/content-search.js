@@ -7,34 +7,6 @@
 
   function getCards() { return Array.from(document.querySelectorAll(SELECTORS.jobs.jobCard)); }
 
-  function getScrollContainers() {
-    const selectors = [
-      '.job-list-container', '.job-list-box', '.job-list',
-      '.search-job-list', '[class*="job-list"]', '[class*="job-scroll"]'
-    ];
-    const found = [];
-    for (const selector of selectors) {
-      for (const el of document.querySelectorAll(selector)) {
-        if (el.scrollHeight > el.clientHeight + 20 && !found.includes(el)) found.push(el);
-      }
-    }
-    return found;
-  }
-
-  async function loadMoreJobs() {
-    const before = getCards().length;
-    const containers = getScrollContainers();
-    if (containers.length) {
-      for (const el of containers) el.scrollTop = el.scrollHeight;
-      containers[0].dispatchEvent(new Event('scroll', { bubbles: true }));
-    } else {
-      window.scrollTo(0, document.body.scrollHeight);
-      window.dispatchEvent(new Event('scroll'));
-    }
-    await sleep(1500);
-    return getCards().length > before;
-  }
-
   function parseCard(card) {
     const nameEl = card.querySelector(SELECTORS.jobs.jobName);
     const salEl = card.querySelector(SELECTORS.jobs.jobSalary);
@@ -56,58 +28,23 @@
     };
   }
 
-  function salaryFloorK(text) {
-    const s = (text || '').replace(/,/g, '').toLowerCase();
-    if (!s || /面议|面谈|不限/.test(s)) return null;
-    const nums = s.match(/\d+(?:\.\d+)?/g);
-    if (!nums || !nums.length) return null;
-    const value = Number(nums[0]);
-    if (!Number.isFinite(value)) return null;
-    return /万/.test(s) ? value * 10 : value;
-  }
-
-  async function captureJD(card) {
-    card.scrollIntoView({ block: 'center' });
-    card.click();
-    await sleep(900);
-    const det = document.querySelector('.job-detail-box, [class*="job-detail"], .detail-content, .job-detail');
-    let jd = det ? (det.innerText || '').trim() : '';
-    if (!jd) {
-      const secs = document.querySelectorAll('.job-sec-text, [class*="job-sec"], [class*="job-desc"]');
-      jd = Array.from(secs).map(s => (s.innerText || '').trim()).filter(Boolean).join('\n');
-    }
-    return jd.slice(0, 3000);
-  }
-
-  async function scrape(count, minSalary) {
+  async function scrape(count) {
     const seen = {};
     const jobs = [];
     let stall = 0;
-    let lastSignature = '';
-    // BOSS uses virtualized/infinite lists. Keep trying while the DOM is unchanged,
-    // but allow enough time for lazy loading and pagination to complete.
-    for (let loop = 0; loop < 80 && jobs.length < count && stall < 10; loop++) {
+    for (let loop = 0; loop < 40 && jobs.length < count && stall < 4; loop++) {
       const cards = getCards();
       let added = 0;
       for (const c of cards) {
         const j = parseCard(c);
-        const floor = salaryFloorK(j.salary);
-        const salaryOk = !minSalary || floor === null || floor >= minSalary;
-        if (j.id && salaryOk && !seen[j.id]) {
-          seen[j.id] = 1;
-          jobs.push(j); added++;
-          if (jobs.length >= count) break;
-        }
+        if (j.id && !seen[j.id]) { seen[j.id] = 1; jobs.push(j); added++; if (jobs.length >= count) break; }
       }
-      const signature = cards.map(c => {
-        const n = c.querySelector(SELECTORS.jobs.jobName);
-        return n ? n.textContent.trim() : '';
-      }).join('|');
-      if (added === 0 && signature === lastSignature) stall++; else stall = 0;
-      lastSignature = signature;
+      if (added === 0) stall++; else stall = 0;
       if (jobs.length >= count) break;
-      const loaded = await loadMoreJobs();
-      if (!loaded && added === 0) await sleep(1000);
+      window.scrollTo(0, document.body.scrollHeight);
+      const container = document.querySelector('.job-list-container, .job-list-box, [class*="job-list"]');
+      if (container) container.scrollTop = container.scrollHeight;
+      await sleep(1200);
     }
     return jobs.slice(0, count);
   }
@@ -163,18 +100,6 @@
     return { success: true, jd: jd.slice(0, 1800) };
   }
 
-  async function openDirect(job) {
-    const btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 8000);
-    const det = document.querySelector('.job-detail-box, [class*="job-detail"], .detail-content, .job-detail');
-    const jd = det ? (det.innerText || '').trim().slice(0, 3000) : '';
-    if (!btn) return { success: false, error: '详情页未找到立即沟通按钮', jd: jd };
-    btn.click();
-    await sleep(1500);
-    const go = await waitForText(['继续沟通'], 5000);
-    if (go) go.click();
-    return { success: true, jd: jd, navigated: !!go };
-  }
-
   // 卡片已打开 → 点立即沟通 → 弹窗点"继续沟通"（跳转聊天页）
   async function goChat(job) {
     let btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 5000);
@@ -196,15 +121,11 @@
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SCRAPE') {
-      scrape(msg.count || 20, Number(msg.minSalary) || 0).then(jobs => sendResponse({ success: true, jobs: jobs })).catch(e => sendResponse({ success: false, error: e.message }));
+      scrape(msg.count || 20).then(jobs => sendResponse({ success: true, jobs: jobs })).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
     if (msg.type === 'OPEN_JD') {
       openJD(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
-      return true;
-    }
-    if (msg.type === 'OPEN_DIRECT') {
-      openDirect(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
     if (msg.type === 'GO_CHAT' || msg.type === 'INITIATE' || msg.type === 'CREATE_CONV') {

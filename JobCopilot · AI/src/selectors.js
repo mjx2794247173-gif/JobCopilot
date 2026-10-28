@@ -1,5 +1,5 @@
 // BOSS 直聘选择器（借鉴即投实测验证版）
-globalThis.SELECTORS = globalThis.SELECTORS || {
+const SELECTORS = {
   jobs: {
     jobCard: 'li.job-card-box',
     jobName: '.job-name',
@@ -19,7 +19,7 @@ globalThis.SELECTORS = globalThis.SELECTORS || {
   }
 };
 
-globalThis.CITY_MAP = globalThis.CITY_MAP || {
+const CITY_MAP = {
   '全国':'100010000','北京':'101010100','上海':'101020100','广州':'101280100','深圳':'101280600',
   '杭州':'101210100','成都':'101270100','武汉':'101200100','西安':'101110100','南京':'101190100',
   '苏州':'101190400','天津':'101030100','重庆':'101040100','长沙':'101250100','郑州':'101180100',

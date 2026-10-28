@@ -40,7 +40,6 @@
 
   function dataURLtoFile(dataUrl, name) {
     const parts = dataUrl.split(',');
-    if (parts.length !== 2 || !parts[0].match(/:(.*?);/) || !parts[1]) throw new Error('简历图片数据无效');
     const mime = parts[0].match(/:(.*?);/)[1];
     const bin = atob(parts[1]);
     const arr = new Uint8Array(bin.length);
@@ -129,7 +128,6 @@
     const oc = await openConversation(msg.company, msg.hrName, msg.position);
     if (!oc.ok) return { success: false, error: oc.err };
     const imgOk = await sendImage(msg.image);
-    if (msg.image && !imgOk) return { success: false, error: '未找到简历图片上传控件' };
     await sleep(800);
     const tr = await sendText(msg.greeting);
     if (!tr.ok) return { success: false, error: tr.err };
@@ -146,7 +144,6 @@
     }
     if (!input) return { success: false, error: '未找到输入框｜' + dumpInputs() };
     const imgOk = await sendImage(image);
-    if (image && !imgOk) return { success: false, error: '未找到简历图片上传控件' };
     await sleep(800);
     const tr = await sendText(greeting);
     if (!tr.ok) return { success: false, error: tr.err };
