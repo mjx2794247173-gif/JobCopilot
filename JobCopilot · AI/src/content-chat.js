@@ -3,6 +3,17 @@
   if (window.__bossToudiChat) return;
   window.__bossToudiChat = true;
 
+  // 与搜索页一样保持脚本自包含，避免详情页/聊天页跳转后的注入时序问题。
+  const SELECTORS = globalThis.SELECTORS || {
+    chat: {
+      userList: '.user-list-content li',
+      chatInput: 'div#chat-input.chat-input',
+      btnSend: 'button.btn-send',
+      imageUpload: '.btn-sendimg input[type=file]',
+      messageSent: '.item-myself'
+    }
+  };
+
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   // 多选择器找第一个可见元素
@@ -109,14 +120,19 @@
     if (!inputText(input).trim()) return { ok: false, err: '文字未填入输入框' };
 
     const before = document.querySelectorAll(SELECTORS.chat.messageSent).length;
-    // 以回车为主发送
+    // 以回车为主发送。不要同时点击发送按钮，否则某些页面会重复发送。
     pressEnter(input);
-    // 兜底：若有发送按钮也点一下
+
+    // 先等待回车结果；若仍未发送，再只点击一次按钮兜底。
+    for (let i = 0; i < 6; i++) {
+      await sleep(300);
+      const cleared = !inputText(input).trim();
+      const after = document.querySelectorAll(SELECTORS.chat.messageSent).length;
+      if (cleared || after > before) return { ok: true };
+    }
     const btn = findVisible(SEND_SELS);
     if (btn && !btn.classList.contains('disabled') && !btn.disabled) btn.click();
-
-    // 验证：输入框被清空 或 新增自己消息气泡 => 成功
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 8; i++) {
       await sleep(300);
       const cleared = !inputText(input).trim();
       const after = document.querySelectorAll(SELECTORS.chat.messageSent).length;
@@ -138,12 +154,8 @@
 
   // 发给当前已打开的会话（点继续沟通后跳进来的就是目标岗位，无需匹配）
   async function sendActive(image, greeting) {
-    let input = await waitVisible(INPUT_SELS, 6000);
-    if (!input) {
-      const items = document.querySelectorAll(SELECTORS.chat.userList);
-      if (items[0]) { items[0].click(); await sleep(1500); }
-      input = await waitVisible(INPUT_SELS, 6000);
-    }
+    // 刚从岗位页进入的就是目标会话，不要点击列表第一项，以免投错会话。
+    const input = await waitVisible(INPUT_SELS, 12000);
     if (!input) return { success: false, error: '未找到输入框｜' + dumpInputs() };
     const imgOk = await sendImage(image);
     if (image && !imgOk) return { success: false, error: '未找到简历图片上传控件' };

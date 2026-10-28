@@ -92,7 +92,8 @@ async function ensureInjected(tabId, file) {
   // selectors.js 已由 manifest 的 content_scripts 自动加载；这里不要再次注入，
   // 否则旧页面中已有的 const SELECTORS 会与重复脚本冲突。
   try {
-    const files = file === 'src/content-search.js' ? ['src/selectors.js', file] : [file];
+    const needsSelectors = file === 'src/content-search.js' || file === 'src/content-chat.js';
+    const files = needsSelectors ? ['src/selectors.js', file] : [file];
     await chrome.scripting.executeScript({ target: { tabId: tabId }, files: files });
     return true;
   }
@@ -123,6 +124,15 @@ function waitTabComplete(tabId, timeoutMs) {
     chrome.tabs.get(tabId, (t) => { if (t && t.status === 'complete') setTimeout(finish, 1200); });
     setTimeout(finish, timeoutMs || 25000);
   });
+}
+async function waitForUrlPart(tabId, part, timeoutMs) {
+  const end = Date.now() + (timeoutMs || 20000);
+  while (Date.now() < end) {
+    const url = await curUrl(tabId);
+    if (url.indexOf(part) >= 0) return true;
+    await sleep(300);
+  }
+  return false;
 }
 function resolveCity(cfg) {
   const firstCity = (cfg.city || '').split(/[\/、,，\s]+/)[0].replace(/[市省]$/, '') || '';
@@ -301,15 +311,19 @@ async function runDeliver(jobIds) {
         progress(k + 1, ids.length, '投递');
         continue;
       }
-      await waitTabComplete(tab.id); await sleep(2500);
-    } else { await waitTabComplete(tab.id); await sleep(2500); }
+      await waitForUrlPart(tab.id, '/web/geek/chat', 20000);
+      await sleep(1200);
+    } else {
+      await waitForUrlPart(tab.id, '/web/geek/chat', 20000);
+      await sleep(1200);
+    }
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
     const u = await curUrl(tab.id);
     if (u.indexOf('/web/geek/chat') < 0) { recordFail(job, '未跳转聊天页'); log('  未进入聊天页，跳过', 'error'); progress(k + 1, ids.length, '投递'); continue; }
     await ensureInjected(tab.id, 'src/content-chat.js');
     log('  发简历图片 + 招呼语...');
-    const r = await sendToTab(tab.id, { type: 'SEND_ACTIVE', image: cfg.resumeImage || '', greeting: greeting });
+    const r = await sendToTab(tab.id, { type: 'SEND_ACTIVE', image: cfg.resumeImage || '', greeting: greeting }, 30000);
     if (r && r.success) { recordOk(job); state.processed[job.id] = 1; await chrome.storage.local.set({ processed: state.processed }); log('  ✓ 投递成功', 'success'); }
     else { recordFail(job, (r && r.error) || '发送失败'); log('  失败：' + (r && r.error), 'error'); }
     progress(k + 1, ids.length, '投递');
