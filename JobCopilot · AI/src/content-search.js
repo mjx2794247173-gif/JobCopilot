@@ -3,6 +3,18 @@
   if (window.__bossToudiSearch) return;
   window.__bossToudiSearch = true;
 
+  // 详情页可能由后台直接打开，manifest 尚未完成 selectors.js 注入。
+  // 使用脚本内兜底，避免因注入时序出现 SELECTORS is not defined。
+  const SELECTORS = globalThis.SELECTORS || {
+    jobs: {
+      jobCard: 'li.job-card-box',
+      jobName: '.job-name',
+      jobSalary: '.job-salary',
+      tagList: '.tag-list li',
+      immediateChatBtn: 'a.op-btn-chat'
+    }
+  };
+
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   function getCards() { return Array.from(document.querySelectorAll(SELECTORS.jobs.jobCard)); }
