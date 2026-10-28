@@ -199,6 +199,33 @@
     });
   }
 
+  function findChatButton() {
+    const direct = document.querySelector([
+      SELECTORS.jobs.immediateChatBtn,
+      'a[class*="chat"]', 'button[class*="chat"]',
+      '[class*="op-btn"]', '[ka*="chat"]', '[data-ka*="chat"]'
+    ].join(','));
+    if (direct && direct.offsetParent !== null) return direct;
+    const elements = document.querySelectorAll('a, button, [role="button"], div, span');
+    for (const el of elements) {
+      const text = (el.textContent || '').replace(/\s+/g, '').trim();
+      if (text !== '立即沟通' && text !== '继续沟通' && text !== '打招呼') continue;
+      const clickable = el.closest('a, button, [role="button"], [class*="btn"]') || el;
+      if (clickable.offsetParent !== null) return clickable;
+    }
+    return null;
+  }
+
+  async function waitForChatButton(timeout) {
+    const started = Date.now();
+    while (Date.now() - started < timeout) {
+      const button = findChatButton();
+      if (button) return button;
+      await sleep(250);
+    }
+    return null;
+  }
+
   // 点开卡片 → 抓取右侧详情面板的完整JD
   async function openJD(job) {
     const card = findCardByJob(job);
@@ -218,34 +245,28 @@
   }
 
   async function openDirect(job) {
-    const btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 8000);
     const det = document.querySelector('.job-detail-box, [class*="job-detail"], .detail-content, .job-detail');
     const jd = det ? (det.innerText || '').trim().slice(0, 3000) : '';
-    if (!btn) return { success: false, error: '详情页未找到立即沟通按钮', jd: jd };
-    btn.click();
-    await sleep(1500);
-    const go = await waitForText(['继续沟通'], 5000);
-    if (go) go.click();
-    return { success: true, jd: jd, navigated: !!go };
+    return { success: true, jd: jd, navigated: false };
   }
 
   // 卡片已打开 → 点立即沟通 → 弹窗点"继续沟通"（跳转聊天页）
   async function goChat(job) {
-    let btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 5000);
-    if (!btn) {
-      const all = document.querySelectorAll('a, button, span');
-      for (const el of all) { const tx = (el.textContent || '').trim(); if (tx === '立即沟通' || tx === '继续沟通') { btn = el; break; } }
-    }
+    let btn = await waitForChatButton(5000);
     if (!btn) { // 面板可能关了，重新点卡片
       const card = findCardByJob(job);
-      if (card) { card.click(); await sleep(1200); btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 4000); }
+      if (card) { card.click(); await sleep(1200); btn = await waitForChatButton(4000); }
     }
     if (!btn) return { success: false, error: '未找到立即沟通按钮' };
-    btn.click();
-    await sleep(1500);
-    const go = await waitForText(['继续沟通'], 4000);
-    if (go) { go.click(); return { success: true, navigated: true }; }
-    return { success: true, navigated: false };
+    // 先把成功响应交还后台，再异步点击。否则点击引起页面跳转时，
+    // 当前消息通道会被浏览器销毁，后台会误判为投递失败。
+    setTimeout(async () => {
+      btn.click();
+      await sleep(1500);
+      const go = await waitForText(['继续沟通'], 4000);
+      if (go) go.click();
+    }, 50);
+    return { success: true, navigating: true };
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

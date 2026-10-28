@@ -258,17 +258,19 @@ async function runDeliver(jobIds) {
     if (!job) { log('[' + (k + 1) + '/' + ids.length + '] 找不到岗位数据，跳过', 'warn'); continue; }
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
-    // 1. 先打开目标岗位卡片，读取完整 JD。
-    const tab = await ensureTab(searchUrl);
+    // 1. 优先直接打开收集时保存的岗位详情链接，避免跨页后找不到原卡片。
+    const tab = await ensureTab(job.link || searchUrl);
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
-    let jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 15000);
+    let jdr = job.link
+      ? await sendToTab(tab.id, { type: 'OPEN_DIRECT', job: job }, 20000)
+      : await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 15000);
     if (!jdr || !jdr.success) {
       if (job.link) {
         log('  搜索列表未找到岗位，改用详情链接...', 'warn');
         await chrome.tabs.update(tab.id, { url: job.link });
         await waitTabComplete(tab.id);
-        if (await ensureDirectInjected(tab.id)) jdr = await sendToTab(tab.id, { type: 'OPEN_DIRECT', job: job }, 15000);
+        if (await ensureDirectInjected(tab.id)) jdr = await sendToTab(tab.id, { type: 'OPEN_DIRECT', job: job }, 20000);
       }
     }
     if (!jdr || !jdr.success) {
@@ -288,7 +290,13 @@ async function runDeliver(jobIds) {
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
     if (!jdr.navigated) {
-      await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
+      const chatResult = await sendToTab(tab.id, { type: 'GO_CHAT', job: job }, 15000);
+      if (!chatResult || !chatResult.success) {
+        recordFail(job, (chatResult && chatResult.error) || '未找到立即沟通按钮');
+        log('  建立联系失败：' + ((chatResult && chatResult.error) || '未找到立即沟通按钮'), 'warn');
+        progress(k + 1, ids.length, '投递');
+        continue;
+      }
       await waitTabComplete(tab.id); await sleep(2500);
     } else { await waitTabComplete(tab.id); await sleep(2500); }
 
