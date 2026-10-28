@@ -42,6 +42,9 @@
 
   async function loadMoreJobs() {
     const before = cardSignature();
+    const cards = getCards();
+    const lastCard = cards[cards.length - 1];
+    if (lastCard) lastCard.scrollIntoView({ block: 'end', behavior: 'auto' });
     const containers = getScrollContainers();
     if (containers.length) {
       // 虚拟列表必须分段滚动；直接跳到底会漏掉中间批次。
@@ -50,10 +53,10 @@
         el.scrollTop = Math.min(el.scrollTop + step, el.scrollHeight);
         el.dispatchEvent(new Event('scroll', { bubbles: true }));
       }
-    } else {
-      window.scrollBy(0, Math.max(600, Math.floor(window.innerHeight * 0.8)));
-      window.dispatchEvent(new Event('scroll'));
     }
+    // BOSS 不同版本可能监听内部列表或页面滚动；两者都触发以兼容。
+    window.scrollBy(0, Math.max(600, Math.floor(window.innerHeight * 0.8)));
+    window.dispatchEvent(new Event('scroll', { bubbles: true }));
     await sleep(1200);
     return cardSignature() !== before;
   }
