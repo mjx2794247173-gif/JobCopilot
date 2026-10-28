@@ -94,6 +94,10 @@ async function ensureInjected(tabId, file) {
   try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: [file] }); return true; }
   catch (e) { log('页面脚本注入失败：' + e.message, 'error'); return false; }
 }
+async function ensureDirectInjected(tabId) {
+  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['src/selectors.js', 'src/content-search.js'] }); return true; }
+  catch (e) { log('详情页脚本注入失败：' + e.message, 'error'); return false; }
+}
 function sendToTab(tabId, msg, timeoutMs) {
   return new Promise((resolve) => {
     let settled = false;
@@ -216,7 +220,15 @@ async function runDeliver(jobIds) {
     const tab = await ensureTab(searchUrl);
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
-    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 15000);
+    let jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 15000);
+    if (!jdr || !jdr.success) {
+      if (job.link) {
+        log('  搜索列表未找到岗位，改用详情链接...', 'warn');
+        await chrome.tabs.update(tab.id, { url: job.link });
+        await waitTabComplete(tab.id);
+        if (await ensureDirectInjected(tab.id)) jdr = await sendToTab(tab.id, { type: 'OPEN_DIRECT', job: job }, 15000);
+      }
+    }
     if (!jdr || !jdr.success) {
       recordFail(job, (jdr && jdr.error) || '读取岗位JD失败');
       log('  读取JD失败，跳过：' + ((jdr && jdr.error) || '未知错误'), 'warn');
@@ -233,8 +245,10 @@ async function runDeliver(jobIds) {
 
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
-    await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
-    await waitTabComplete(tab.id); await sleep(2500);
+    if (!jdr.navigated) {
+      await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
+      await waitTabComplete(tab.id); await sleep(2500);
+    } else { await waitTabComplete(tab.id); await sleep(2500); }
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
     const u = await curUrl(tab.id);

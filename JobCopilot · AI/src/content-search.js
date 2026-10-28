@@ -163,6 +163,18 @@
     return { success: true, jd: jd.slice(0, 1800) };
   }
 
+  async function openDirect(job) {
+    const btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 8000);
+    const det = document.querySelector('.job-detail-box, [class*="job-detail"], .detail-content, .job-detail');
+    const jd = det ? (det.innerText || '').trim().slice(0, 3000) : '';
+    if (!btn) return { success: false, error: '详情页未找到立即沟通按钮', jd: jd };
+    btn.click();
+    await sleep(1500);
+    const go = await waitForText(['继续沟通'], 5000);
+    if (go) go.click();
+    return { success: true, jd: jd, navigated: !!go };
+  }
+
   // 卡片已打开 → 点立即沟通 → 弹窗点"继续沟通"（跳转聊天页）
   async function goChat(job) {
     let btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 5000);
@@ -189,6 +201,10 @@
     }
     if (msg.type === 'OPEN_JD') {
       openJD(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
+    if (msg.type === 'OPEN_DIRECT') {
+      openDirect(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
     if (msg.type === 'GO_CHAT' || msg.type === 'INITIATE' || msg.type === 'CREATE_CONV') {
