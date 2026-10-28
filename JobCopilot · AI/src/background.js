@@ -211,7 +211,7 @@ async function runDeliver(jobIds) {
     const tab = await ensureTab(searchUrl);
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
-    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
+    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 30000);
     if (!jdr || !jdr.success) {
       recordFail(job, (jdr && jdr.error) || '读取岗位JD失败');
       log('  读取JD失败，跳过：' + ((jdr && jdr.error) || '未知错误'), 'warn');
