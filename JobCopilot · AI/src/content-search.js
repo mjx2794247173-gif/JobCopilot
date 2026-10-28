@@ -149,6 +149,23 @@
     return jobs.slice(0, count);
   }
 
+  // 单页快照由后台逐页调用。不要在这个消息处理期间点击分页，
+  // 否则页面导航会销毁 content script，导致消息通道提前关闭。
+  function scrapePage(minSalary) {
+    const jobs = [];
+    const seen = {};
+    for (const card of getCards()) {
+      const job = parseCard(card);
+      const floor = salaryFloorK(job.salary);
+      const salaryOk = !minSalary || floor === null || floor >= minSalary;
+      if (job.id && salaryOk && !seen[job.id]) {
+        seen[job.id] = true;
+        jobs.push(job);
+      }
+    }
+    return jobs;
+  }
+
   function findCardByJob(job) {
     const cards = getCards();
     for (const c of cards) { const j = parseCard(c); if (job.id && j.id === job.id) return c; }
@@ -232,6 +249,10 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === 'SCRAPE_PAGE') {
+      sendResponse({ success: true, jobs: scrapePage(Number(msg.minSalary) || 0) });
+      return;
+    }
     if (msg.type === 'SCRAPE') {
       scrape(msg.count || 20, Number(msg.minSalary) || 0).then(jobs => sendResponse({ success: true, jobs: jobs })).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
