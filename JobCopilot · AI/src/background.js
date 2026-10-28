@@ -1,5 +1,6 @@
 // ===== BOSS自动投递 Service Worker：编排 收集→筛选→审核→投递 + DeepSeek =====
-importScripts('/src/selectors.js'); // 让 SW 也能用 CITY_MAP（否则城市永远是全国）
+// 使用相对扩展路径，避免部分 Edge 版本在 Service Worker 中解析绝对路径失败。
+importScripts('src/selectors.js'); // 让 SW 也能用 CITY_MAP（否则城市永远是全国）
 const DS_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions';
 const DS_MODEL = 'deepseek-chat';
 const DS_TIMEOUT_MS = 30000;
