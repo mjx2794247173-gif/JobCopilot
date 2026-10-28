@@ -1,6 +1,6 @@
 // ===== 侧边栏交互 =====
 const $ = (id) => document.getElementById(id);
-const CFG_FIELDS = ['dsKey', 'resumeText', 'keyword', 'city', 'count'];
+const CFG_FIELDS = ['dsKey', 'resumeText', 'keyword', 'city', 'minSalary', 'count'];
 
 // 折叠
 document.querySelectorAll('.card-h[data-toggle]').forEach(h => {
@@ -11,12 +11,19 @@ document.querySelectorAll('.card-h[data-toggle]').forEach(h => {
 });
 
 // 载入配置
-chrome.storage.local.get(CFG_FIELDS.concat(['resumeImage']), (d) => {
+chrome.storage.local.get(CFG_FIELDS.concat(['resumeImage', 'sw_screened']), (d) => {
   CFG_FIELDS.forEach(f => { if (d[f] !== undefined && $(f)) $(f).value = d[f]; });
   if (d.resumeImage) showImg(d.resumeImage);
+  if (Array.isArray(d.sw_screened) && d.sw_screened.length) renderReview(d.sw_screened);
 });
 
-function showImg(dataUrl) { $('imgPrev').innerHTML = '<img src="' + dataUrl + '">'; }
+function showImg(dataUrl) {
+  $('imgPrev').replaceChildren();
+  const img = document.createElement('img');
+  img.src = dataUrl;
+  img.alt = '简历预览';
+  $('imgPrev').appendChild(img);
+}
 
 $('resumeImg').addEventListener('change', (e) => {
   const file = e.target.files[0]; if (!file) return;
@@ -46,7 +53,12 @@ $('btnCollect').addEventListener('click', async () => {
   if (!$('keyword').value.trim()) return addLog('请先填岗位关键词', 'error');
   $('reviewCard').style.display = 'none';
   setRunning(true);
-  chrome.runtime.sendMessage({ type: 'START_COLLECT' });
+  chrome.runtime.sendMessage({ type: 'START_COLLECT' }, (r) => {
+    if (chrome.runtime.lastError || !r || !r.ok) {
+      setRunning(false);
+      addLog('启动收集失败，请刷新扩展后重试', 'error');
+    }
+  });
 });
 
 $('btnDeliver').addEventListener('click', () => {
@@ -54,7 +66,9 @@ $('btnDeliver').addEventListener('click', () => {
   if (!ids.length) return addLog('请至少勾选一个岗位', 'error');
   setRunning(true);
   addLog('开始投递 ' + ids.length + ' 个岗位', 'info');
-  chrome.runtime.sendMessage({ type: 'START_DELIVER', jobIds: ids });
+  chrome.runtime.sendMessage({ type: 'START_DELIVER', jobIds: ids }, (r) => {
+    if (chrome.runtime.lastError || !r || !r.ok) { setRunning(false); addLog('启动投递失败，请刷新扩展后重试', 'error'); }
+  });
 });
 
 $('btnPause').addEventListener('click', () => {

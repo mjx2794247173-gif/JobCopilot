@@ -1,7 +1,17 @@
 // ===== BOSS自动投递 Service Worker：编排 收集→筛选→审核→投递 + DeepSeek =====
-importScripts('/src/selectors.js'); // 让 SW 也能用 CITY_MAP（否则城市永远是全国）
+// 后台脚本自包含城市编码，避免 Edge Service Worker 因 importScripts 失败而无法启动。
+const CITY_MAP = {
+  '全国':'100010000','北京':'101010100','上海':'101020100','广州':'101280100','深圳':'101280600',
+  '杭州':'101210100','成都':'101270100','武汉':'101200100','西安':'101110100','南京':'101190100',
+  '苏州':'101190400','天津':'101030100','重庆':'101040100','长沙':'101250100','郑州':'101180100',
+  '沈阳':'101070100','青岛':'101120200','合肥':'101220100','厦门':'101230200','福州':'101230100',
+  '济南':'101120100','宁波':'101210400','东莞':'101281600','无锡':'101190200','昆明':'101290100',
+  '哈尔滨':'101050100','长春':'101060100','大连':'101070200','石家庄':'101090100'
+};
 const DS_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions';
 const DS_MODEL = 'deepseek-chat';
+const DS_TIMEOUT_MS = 30000;
+const DS_RETRIES = 2;
 
 const RESUME_TEXT = ''; // 不内置任何个人简历，由用户在设置页"简历文字"填写
 
@@ -22,23 +32,39 @@ function log(text, level) { chrome.runtime.sendMessage({ type: 'LOG', text: text
 function pushPhase() { chrome.runtime.sendMessage({ type: 'PHASE', phase: state.phase }).catch(() => {}); }
 function progress(cur, total, label) { chrome.runtime.sendMessage({ type: 'PROGRESS', cur: cur, total: total, label: label || '' }).catch(() => {}); }
 async function waitIfPaused() { while (state.paused && !state.aborted) await sleep(400); }
-function getCfg() { return chrome.storage.local.get(['dsKey', 'resumeText', 'resumeImage', 'city', 'keyword', 'count']); }
+function getCfg() { return chrome.storage.local.get(['dsKey', 'resumeText', 'resumeImage', 'city', 'keyword', 'minSalary', 'count']); }
 function resumeFull(cfg) { return (cfg.resumeText || '').trim(); }
-function jobInfo(j) { return '岗位：' + (j.name || '') + '\n技能标签：' + ((j.tags || []).join('、')) + '\n薪资：' + (j.salary || '') + '\n公司：' + (j.company || ''); }
+function jobInfo(j) {
+  const jd = (j.jd || '').trim();
+  const compactJD = jd.length > 1200 ? jd.slice(0, 1200) + '\n（JD较长，初筛仅使用前1200字）' : jd;
+  return '岗位：' + (j.name || '') + '\n技能标签：' + ((j.tags || []).join('、')) + '\n薪资：' + (j.salary || '') + '\n公司：' + (j.company || '') + '\nJD：' + compactJD;
+}
 function findJob(id) { for (var i = 0; i < state.jobs.length; i++) if (state.jobs[i].id === id) return state.jobs[i]; return null; }
 
 // ── DeepSeek ──
 async function callDS(messages, maxTokens) {
   const cfg = await getCfg();
   if (!cfg.dsKey) throw new Error('未配置DeepSeek API Key');
-  const resp = await fetch(DS_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.dsKey },
-    body: JSON.stringify({ model: DS_MODEL, messages: messages, max_tokens: maxTokens || 500, temperature: 0.5 })
-  });
-  if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('DeepSeek ' + resp.status + ': ' + t.slice(0, 120)); }
-  const data = await resp.json();
-  return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+  let lastError;
+  for (let attempt = 0; attempt <= DS_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DS_TIMEOUT_MS);
+    try {
+      const resp = await fetch(DS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.dsKey },
+        signal: controller.signal,
+        body: JSON.stringify({ model: DS_MODEL, messages: messages, max_tokens: maxTokens || 500, temperature: 0.5 })
+      });
+      if (!resp.ok) { const t = await resp.text().catch(() => ''); throw new Error('DeepSeek ' + resp.status + ': ' + t.slice(0, 160)); }
+      const data = await resp.json();
+      return (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    } catch (e) {
+      lastError = e.name === 'AbortError' ? new Error('DeepSeek 请求超时') : e;
+      if (attempt < DS_RETRIES) await sleep(1000 * (attempt + 1));
+    } finally { clearTimeout(timer); }
+  }
+  throw lastError || new Error('DeepSeek 请求失败');
 }
 
 // 筛选：只判断是否值得投（用岗位标签快速判断，不生成招呼语）
@@ -63,21 +89,35 @@ async function genGreetingFromJD(cfg, job, jd) {
 
 // ── tab 注入 + 发消息 ──
 async function ensureInjected(tabId, file) {
-  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['src/selectors.js', file] }); } catch (e) {}
+  // selectors.js 已由 manifest 的 content_scripts 自动加载；这里不要再次注入，
+  // 否则旧页面中已有的 const SELECTORS 会与重复脚本冲突。
+  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: [file] }); return true; }
+  catch (e) { log('页面脚本注入失败：' + e.message, 'error'); return false; }
 }
-function sendToTab(tabId, msg) {
+async function ensureDirectInjected(tabId) {
+  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['src/selectors.js', 'src/content-search.js'] }); return true; }
+  catch (e) { log('详情页脚本注入失败：' + e.message, 'error'); return false; }
+}
+function sendToTab(tabId, msg, timeoutMs) {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
+    const timer = setTimeout(() => finish({ success: false, error: '页面响应超时（' + (msg.type || '未知操作') + '）' }), timeoutMs || 15000);
     chrome.tabs.sendMessage(tabId, msg, (resp) => {
-      if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
-      else resolve(resp || { success: false, error: 'no response' });
+      clearTimeout(timer);
+      if (chrome.runtime.lastError) finish({ success: false, error: chrome.runtime.lastError.message });
+      else finish(resp || { success: false, error: '页面无响应' });
     });
   });
 }
-function waitTabComplete(tabId) {
+function waitTabComplete(tabId, timeoutMs) {
   return new Promise((resolve) => {
-    function lis(id, info) { if (id === tabId && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(lis); setTimeout(resolve, 1200); } }
+    let settled = false;
+    const finish = () => { if (!settled) { settled = true; chrome.tabs.onUpdated.removeListener(lis); resolve(); } };
+    function lis(id, info) { if (id === tabId && info.status === 'complete') setTimeout(finish, 1200); }
     chrome.tabs.onUpdated.addListener(lis);
-    chrome.tabs.get(tabId, (t) => { if (t && t.status === 'complete') { chrome.tabs.onUpdated.removeListener(lis); setTimeout(resolve, 1200); } });
+    chrome.tabs.get(tabId, (t) => { if (t && t.status === 'complete') setTimeout(finish, 1200); });
+    setTimeout(finish, timeoutMs || 25000);
   });
 }
 function resolveCity(cfg) {
@@ -105,6 +145,7 @@ function curUrl(tabId) { return new Promise(res => chrome.tabs.get(tabId, t => r
 
 // ── 流程：收集 + 筛选 ──
 async function runCollect() {
+  if (state.phase === 'collecting' || state.phase === 'screening' || state.phase === 'delivering') { log('已有任务正在运行', 'warn'); return; }
   state.aborted = false; state.paused = false;
   state.jobs = []; state.screened = []; state.greetings = {}; state.results = [];
   state.phase = 'collecting'; pushPhase();
@@ -120,12 +161,16 @@ async function runCollect() {
   const count = parseInt(cfg.count) || 20;
 
   log('收集岗位中（目标 ' + count + ' 个）...');
-  await ensureInjected(tab.id, 'src/content-search.js');
-  const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count });
+  if (!await ensureInjected(tab.id, 'src/content-search.js')) { state.phase = 'idle'; pushPhase(); return; }
+  const minSalary = Number(cfg.minSalary) || 0;
+  if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
+  // 收集岗位需要滚动加载，200 个岗位可能超过 15 秒；单独给抓取任务更长超时。
+  // 收集阶段还会逐个读取并保存 JD；大批量岗位可能超过 5 分钟。
+  const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary }, 300000);
   if (!r || !r.success) { log('收集失败：' + (r && r.error), 'error'); state.phase = 'idle'; pushPhase(); return; }
   state.jobs = r.jobs || [];
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
-  if (!state.jobs.length) { state.phase = 'idle'; pushPhase(); return; }
+  if (!state.jobs.length) { log('未收集到岗位，请放宽关键词/城市或刷新 BOSS 页面', 'warn'); state.phase = 'idle'; pushPhase(); return; }
 
   // 筛选（并发3）
   state.phase = 'screening'; pushPhase();
@@ -171,12 +216,26 @@ async function runDeliver(jobIds) {
     if (!job) { log('[' + (k + 1) + '/' + ids.length + '] 找不到岗位数据，跳过', 'warn'); continue; }
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
-    // 1. 回搜索页，点开卡片读取该岗位完整JD
+    // 1. 先打开目标岗位卡片，读取完整 JD。
     const tab = await ensureTab(searchUrl);
-    await ensureInjected(tab.id, 'src/content-search.js');
+    if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
-    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
-    const jd = (jdr && jdr.jd) || '';
+    let jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 15000);
+    if (!jdr || !jdr.success) {
+      if (job.link) {
+        log('  搜索列表未找到岗位，改用详情链接...', 'warn');
+        await chrome.tabs.update(tab.id, { url: job.link });
+        await waitTabComplete(tab.id);
+        if (await ensureDirectInjected(tab.id)) jdr = await sendToTab(tab.id, { type: 'OPEN_DIRECT', job: job }, 15000);
+      }
+    }
+    if (!jdr || !jdr.success) {
+      recordFail(job, (jdr && jdr.error) || '读取岗位JD失败');
+      log('  读取JD失败，跳过：' + ((jdr && jdr.error) || '未知错误'), 'warn');
+      progress(k + 1, ids.length, '投递');
+      continue;
+    }
+    const jd = jdr.jd || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
     log('  AI生成专属招呼语...');
@@ -186,8 +245,10 @@ async function runDeliver(jobIds) {
 
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
-    await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
-    await waitTabComplete(tab.id); await sleep(2500);
+    if (!jdr.navigated) {
+      await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
+      await waitTabComplete(tab.id); await sleep(2500);
+    } else { await waitTabComplete(tab.id); await sleep(2500); }
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
     const u = await curUrl(tab.id);
