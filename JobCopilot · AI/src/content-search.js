@@ -97,6 +97,13 @@
 
   function findCardNow(job) {
     const cards = getCards();
+    if (job.link) {
+      const target = job.link.split('?')[0];
+      for (const c of cards) {
+        const link = c.querySelector('a[href*="/job_detail/"]');
+        if (link && link.href.split('?')[0] === target) return c;
+      }
+    }
     for (const c of cards) { const j = parseCard(c); if (job.id && j.id === job.id) return c; }
     for (const c of cards) { const j = parseCard(c); if (j.name === job.name && (!job.company || j.company === job.company)) return c; }
     return null;
@@ -107,7 +114,13 @@
     if (card) return card;
     // BOSS 使用虚拟列表，收集完成后目标卡片可能已被移出 DOM；
     // 分段滚动并重复查找，直到找到目标或确认当前列表没有它。
-    for (let i = 0; i < 24; i++) {
+    const containers = getScrollContainers();
+    for (const el of containers) el.scrollTop = 0;
+    window.scrollTo(0, 0);
+    await sleep(500);
+    card = findCardNow(job);
+    if (card) return card;
+    for (let i = 0; i < 36; i++) {
       const containers = getScrollContainers();
       if (containers.length) {
         for (const el of containers) el.scrollTop = Math.min(el.scrollTop + Math.max(500, el.clientHeight * 0.8), el.scrollHeight);
