@@ -34,7 +34,11 @@ function progress(cur, total, label) { chrome.runtime.sendMessage({ type: 'PROGR
 async function waitIfPaused() { while (state.paused && !state.aborted) await sleep(400); }
 function getCfg() { return chrome.storage.local.get(['dsKey', 'resumeText', 'resumeImage', 'city', 'keyword', 'minSalary', 'count']); }
 function resumeFull(cfg) { return (cfg.resumeText || '').trim(); }
-function jobInfo(j) { return '岗位：' + (j.name || '') + '\n技能标签：' + ((j.tags || []).join('、')) + '\n薪资：' + (j.salary || '') + '\n公司：' + (j.company || '') + '\nJD：' + (j.jd || ''); }
+function jobInfo(j) {
+  const jd = (j.jd || '').trim();
+  const compactJD = jd.length > 1200 ? jd.slice(0, 1200) + '\n（JD较长，初筛仅使用前1200字）' : jd;
+  return '岗位：' + (j.name || '') + '\n技能标签：' + ((j.tags || []).join('、')) + '\n薪资：' + (j.salary || '') + '\n公司：' + (j.company || '') + '\nJD：' + compactJD;
+}
 function findJob(id) { for (var i = 0; i < state.jobs.length; i++) if (state.jobs[i].id === id) return state.jobs[i]; return null; }
 
 // ── DeepSeek ──
