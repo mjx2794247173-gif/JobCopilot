@@ -95,43 +95,10 @@
     return jobs.slice(0, count);
   }
 
-  function findCardNow(job) {
+  function findCardByJob(job) {
     const cards = getCards();
-    if (job.link) {
-      const target = job.link.split('?')[0];
-      for (const c of cards) {
-        const link = c.querySelector('a[href*="/job_detail/"]');
-        if (link && link.href.split('?')[0] === target) return c;
-      }
-    }
     for (const c of cards) { const j = parseCard(c); if (job.id && j.id === job.id) return c; }
     for (const c of cards) { const j = parseCard(c); if (j.name === job.name && (!job.company || j.company === job.company)) return c; }
-    return null;
-  }
-
-  async function findCardByJob(job) {
-    let card = findCardNow(job);
-    if (card) return card;
-    // BOSS 使用虚拟列表，收集完成后目标卡片可能已被移出 DOM；
-    // 分段滚动并重复查找，直到找到目标或确认当前列表没有它。
-    const containers = getScrollContainers();
-    for (const el of containers) el.scrollTop = 0;
-    window.scrollTo(0, 0);
-    await sleep(500);
-    card = findCardNow(job);
-    if (card) return card;
-    for (let i = 0; i < 36; i++) {
-      const containers = getScrollContainers();
-      if (containers.length) {
-        for (const el of containers) el.scrollTop = Math.min(el.scrollTop + Math.max(500, el.clientHeight * 0.8), el.scrollHeight);
-        containers[0].dispatchEvent(new Event('scroll', { bubbles: true }));
-      } else {
-        window.scrollBy(0, Math.max(500, window.innerHeight * 0.8));
-      }
-      await sleep(500);
-      card = findCardNow(job);
-      if (card) return card;
-    }
     return null;
   }
 
@@ -163,7 +130,7 @@
 
   // 点开卡片 → 抓取右侧详情面板的完整JD
   async function openJD(job) {
-    const card = await findCardByJob(job);
+    const card = findCardByJob(job);
     if (!card) return { success: false, error: '未找到岗位卡片' };
     card.scrollIntoView({ block: 'center' });
     await sleep(400);
@@ -187,7 +154,7 @@
       for (const el of all) { const tx = (el.textContent || '').trim(); if (tx === '立即沟通' || tx === '继续沟通') { btn = el; break; } }
     }
     if (!btn) { // 面板可能关了，重新点卡片
-      const card = await findCardByJob(job);
+      const card = findCardByJob(job);
       if (card) { card.click(); await sleep(1200); btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 4000); }
     }
     if (!btn) return { success: false, error: '未找到立即沟通按钮' };

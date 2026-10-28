@@ -211,9 +211,14 @@ async function runDeliver(jobIds) {
     const tab = await ensureTab(searchUrl);
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
-    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 10000);
-    const jd = (jdr && jdr.success && jdr.jd) || '';
-    if (!jd) log('  JD读取失败，使用岗位标签生成招呼语，继续尝试', 'warn');
+    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job }, 15000);
+    if (!jdr || !jdr.success) {
+      recordFail(job, (jdr && jdr.error) || '读取岗位JD失败');
+      log('  读取JD失败，跳过：' + ((jdr && jdr.error) || '未知错误'), 'warn');
+      progress(k + 1, ids.length, '投递');
+      continue;
+    }
+    const jd = jdr.jd || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
     log('  AI生成专属招呼语...');
@@ -223,7 +228,6 @@ async function runDeliver(jobIds) {
 
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
-    await ensureInjected(tab.id, 'src/content-search.js');
     await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
     await waitTabComplete(tab.id); await sleep(2500);
 
