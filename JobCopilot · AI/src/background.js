@@ -156,7 +156,8 @@ async function runCollect() {
   if (!await ensureInjected(tab.id, 'src/content-search.js')) { state.phase = 'idle'; pushPhase(); return; }
   const minSalary = Number(cfg.minSalary) || 0;
   if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
-  const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary });
+  // 收集岗位需要滚动加载，200 个岗位可能超过 15 秒；单独给抓取任务更长超时。
+  const r = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary }, 300000);
   if (!r || !r.success) { log('收集失败：' + (r && r.error), 'error'); state.phase = 'idle'; pushPhase(); return; }
   state.jobs = r.jobs || [];
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
