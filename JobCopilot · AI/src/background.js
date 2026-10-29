@@ -191,6 +191,7 @@ async function collectInHelperTab(cfg, count, minSalary) {
     // 先记录首屏，再按小批次滚动虚拟列表；每次消息都在数秒内返回，避免长消息超时。
     await ensureInjected(helperTab.id, 'src/content-search.js');
     let first = await sendToTab(helperTab.id, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
+    if (first && first.stats && minSalary > 0) log('薪资识别：岗位卡 ' + first.stats.total + ' 个，识别到薪资 ' + first.stats.salaryKnown + ' 个', 'info');
     if (first && first.success) {
       for (const job of (first.jobs || [])) {
         if (job.id && !seen[job.id]) { seen[job.id] = true; jobs.push(job); if (jobs.length >= count) break; }
