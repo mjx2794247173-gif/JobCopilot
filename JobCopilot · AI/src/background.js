@@ -89,9 +89,9 @@ async function screenJob(cfg, job) {
 
 // 投递时：结合该岗位的【完整JD】+ 简历，现场生成专属招呼语
 async function genGreetingFromJD(cfg, job, jd) {
-  const sys = '你是求职者本人，在BOSS直聘给HR发招呼语。回复会原样发给HR，严禁任何注释、说明、括号备注、字数统计或引导语。\n【格式】1.开头前15字必须是"熟悉XXX、XXX"(填该JD要求且你简历具备的核心技能1-2个)。2.紧接"做过XXX"说明简历里与该岗位相关的具体项目/经历。3.全文80-120字，真诚自然。';
+  const sys = '你是求职者本人，在BOSS直聘给HR发招呼语。回复会原样发给HR，严禁任何注释、说明、括号备注、字数统计或引导语。\n【固定开头】必须以这句话开头，不能改写或省略："您好，我本科毕业于辽宁大学（211、双一流）金融学专业，目前在德国柏林洪堡大学攻读农业经济学硕士，预计2027年7月毕业。"\n【后续内容】紧接固定开头，用1-2句话结合JD，说明你具备的相关技能或项目经历，并表达希望沟通岗位机会。只写简历中真实存在的经历，不得编造。\n【长度】全文100-150字，真诚自然，避免堆砌技术名词。';
   const jdText = (jd && jd.trim()) ? jd.trim() : ('技能标签：' + (job.tags || []).join('、'));
-  const user = '我的简历：\n' + resumeFull(cfg) + '\n\n目标岗位：' + (job.name || '') + (job.company ? ('（' + job.company + '）') : '') + '\n该岗位JD：\n' + jdText + '\n\n请按格式生成一段招呼语，开头必须"熟悉…"，直接输出招呼语本身，不要任何多余内容。';
+  const user = '我的简历：\n' + resumeFull(cfg) + '\n\n目标岗位：' + (job.name || '') + (job.company ? ('（' + job.company + '）') : '') + '\n该岗位JD：\n' + jdText + '\n\n请严格按固定开头和后续内容要求生成一段招呼语，直接输出招呼语本身，不要任何多余内容。';
   const raw = await callDS([{ role: 'system', content: sys }, { role: 'user', content: user }], 300);
   return (raw || '').trim();
 }
