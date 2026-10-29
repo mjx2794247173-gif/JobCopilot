@@ -156,14 +156,8 @@
       return true;
     }
     if (msg.type === 'SEND_ACTIVE') {
-      // 先同步确认已开始，再以 Port 回传最终结果；避免长异步任务的单次消息回调失联。
-      const port = chrome.runtime.connect({ name: 'jobcopilot-active-send' });
-      sendResponse({ accepted: true });
-      sendActive(msg.image, msg.greeting)
-        .then(r => port.postMessage({ type: 'SEND_ACTIVE_RESULT', requestId: msg.requestId, result: r }))
-        .catch(e => port.postMessage({ type: 'SEND_ACTIVE_RESULT', requestId: msg.requestId, result: { success: false, error: e.message } }))
-        .finally(() => setTimeout(() => port.disconnect(), 250));
-      return;
+      sendActive(msg.image, msg.greeting).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
     }
   });
 })();

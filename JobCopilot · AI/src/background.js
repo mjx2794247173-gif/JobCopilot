@@ -19,28 +19,6 @@ let state = {
   phase: 'idle', paused: false, aborted: false,
   jobs: [], screened: [], greetings: {}, results: [], processed: {}
 };
-const activeSendWaiters = new Map();
-
-function waitForActiveSend(requestId) {
-  return new Promise((resolve) => activeSendWaiters.set(requestId, resolve));
-}
-function cancelActiveSend(requestId) {
-  activeSendWaiters.delete(requestId);
-}
-
-// 长发送任务通过 Port 回传结果，避免一次性 sendMessage 回调在页面切换或
-// service worker 生命周期变化时丢失，导致投递流程永久等待。
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'jobcopilot-active-send') return;
-  port.onMessage.addListener((msg) => {
-    if (!msg || msg.type !== 'SEND_ACTIVE_RESULT' || !msg.requestId) return;
-    const resolve = activeSendWaiters.get(msg.requestId);
-    if (resolve) {
-      activeSendWaiters.delete(msg.requestId);
-      resolve(msg.result || { success: false, error: '发送结果为空' });
-    }
-  });
-});
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
@@ -346,18 +324,7 @@ async function runDeliver(jobIds) {
     if (u.indexOf('/web/geek/chat') < 0) { recordFail(job, '未跳转聊天页'); log('  未进入聊天页，跳过', 'error'); progress(k + 1, ids.length, '投递'); continue; }
     await ensureInjected(tab.id, 'src/content-chat.js');
     log('  发简历图片 + 招呼语...');
-    // 发送动作仍由原版聊天脚本执行；结果改用 Port 回传，避免一次性回调永久挂起。
-    const requestId = 'send_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-    const sent = waitForActiveSend(requestId);
-    const started = await sendToTab(tab.id, { type: 'SEND_ACTIVE', requestId: requestId, image: cfg.resumeImage || '', greeting: greeting }, 15000);
-    if (!started || !started.accepted) {
-      cancelActiveSend(requestId);
-      recordFail(job, (started && started.error) || '聊天页未确认发送任务');
-      log('  失败：' + ((started && started.error) || '聊天页未确认发送任务'), 'error');
-      progress(k + 1, ids.length, '投递');
-      continue;
-    }
-    const r = await sent;
+    const r = await sendToTab(tab.id, { type: 'SEND_ACTIVE', image: cfg.resumeImage || '', greeting: greeting });
     if (r && r.success) { recordOk(job); state.processed[job.id] = 1; await chrome.storage.local.set({ processed: state.processed }); log('  ✓ 投递成功', 'success'); }
     else { recordFail(job, (r && r.error) || '发送失败'); log('  失败：' + (r && r.error), 'error'); }
     progress(k + 1, ids.length, '投递');
