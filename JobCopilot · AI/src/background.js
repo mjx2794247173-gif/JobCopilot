@@ -362,6 +362,11 @@ function finishDeliver() {
 
 // ── 消息入口 ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // content script 的阶段提示转发给侧栏展示。
+  if (msg.type === 'LOG' && sender.tab) {
+    chrome.runtime.sendMessage({ type: 'LOG', text: msg.text, level: msg.level || 'info' }).catch(() => {});
+    return;
+  }
   if (msg.type === 'START_COLLECT') { runCollect(); sendResponse({ ok: true }); return; }
   if (msg.type === 'START_DELIVER') { runDeliver(msg.jobIds); sendResponse({ ok: true }); return; }
   if (msg.type === 'PAUSE') { state.paused = true; log('已暂停', 'warn'); sendResponse({ ok: true }); return; }
