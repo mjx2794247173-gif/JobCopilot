@@ -290,6 +290,19 @@
     return { success: true, jd: jd.slice(0, 1800) };
   }
 
+  // 200条岗位来自虚拟列表，投递时需先在搜索页滚动回目标卡片。
+  async function locateAndOpenJD(job) {
+    let stalled = 0;
+    for (let i = 0; i < 80; i++) {
+      const card = findCardByJob(job);
+      if (card) return openJD(job);
+      const advanced = await loadMoreJobs();
+      if (advanced) stalled = 0;
+      else if (++stalled >= 5) break;
+    }
+    return { success: false, error: '搜索列表未找到岗位卡片' };
+  }
+
   async function openDirect(job) {
     const det = document.querySelector('.job-detail-box, [class*="job-detail"], .detail-content, .job-detail');
     const jd = det ? (det.innerText || '').trim().slice(0, 3000) : '';
@@ -339,6 +352,10 @@
     }
     if (msg.type === 'OPEN_JD') {
       openJD(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
+    if (msg.type === 'OPEN_JD_FROM_LIST') {
+      locateAndOpenJD(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
     if (msg.type === 'OPEN_DIRECT') {
