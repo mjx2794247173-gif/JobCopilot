@@ -312,18 +312,6 @@
     return { success: true, navigated: false };
   }
 
-  // 详情页顶部薪资是最低月薪筛选的最终依据；避免依赖列表页延迟渲染的字段。
-  function readDetailSalary() {
-    const nodes = Array.from(document.querySelectorAll('.job-salary, [class*="salary"], [class*="pay"]'));
-    for (const node of nodes) {
-      const text = (node.innerText || node.textContent || '').trim();
-      if (/\d+(?:\.\d+)?\s*(?:[-~—至]\s*\d+(?:\.\d+)?\s*)?(?:k|K|万)/.test(text)) return text;
-    }
-    const headText = (document.body && (document.body.innerText || document.body.textContent) || '').slice(0, 1800);
-    const match = headText.match(/\d+(?:\.\d+)?\s*(?:[-~—至]\s*\d+(?:\.\d+)?\s*)?(?:k|K|万)/) || headText.match(/\d{4,6}\s*(?:[-~—至]\s*\d{4,6})/);
-    return match ? match[0].replace(/\s+/g, '') : '';
-  }
-
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SCRAPE_PAGE') {
       sendResponse({ success: true, jobs: scrapePage(Number(msg.minSalary) || 0) });
@@ -349,10 +337,6 @@
     if (msg.type === 'OPEN_JD') {
       openJD(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
-    }
-    if (msg.type === 'READ_DETAIL_SALARY') {
-      sendResponse({ success: true, salary: readDetailSalary() });
-      return;
     }
     if (msg.type === 'GO_CHAT' || msg.type === 'INITIATE' || msg.type === 'CREATE_CONV') {
       goChat(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
