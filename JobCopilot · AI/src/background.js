@@ -34,6 +34,16 @@ function progress(cur, total, label) { chrome.runtime.sendMessage({ type: 'PROGR
 async function waitIfPaused() { while (state.paused && !state.aborted) await sleep(400); }
 function getCfg() { return chrome.storage.local.get(['dsKey', 'resumeText', 'resumeImage', 'city', 'keyword', 'minSalary', 'count']); }
 function resumeFull(cfg) { return (cfg.resumeText || '').trim(); }
+function salaryFloorK(text) {
+  const s = String(text || '').replace(/,/g, '').toLowerCase();
+  if (!s || /面议|面谈|不限/.test(s)) return null;
+  const nums = s.match(/\d+(?:\.\d+)?/g);
+  if (!nums || !nums.length) return null;
+  const value = Number(nums[0]);
+  if (!Number.isFinite(value)) return null;
+  if (/万/.test(s)) return value * 10;
+  return value >= 1000 ? value / 1000 : value;
+}
 function jobInfo(j) {
   const jd = (j.jd || '').trim();
   const compactJD = jd.length > 1200 ? jd.slice(0, 1200) + '\n（JD较长，初筛仅使用前1200字）' : jd;
@@ -233,6 +243,37 @@ async function collectInHelperTab(cfg, count, minSalary) {
   return jobs.slice(0, count);
 }
 
+// 列表页薪资经常延迟渲染；按用户选择的最低月薪，改在详情页顶部做最终核验。
+async function verifySalaryInDetails(candidates, minSalary, targetCount) {
+  const verified = [];
+  let detailTab = null;
+  try {
+    detailTab = await chrome.tabs.create({ active: false });
+    for (let i = 0; i < candidates.length && verified.length < targetCount && !state.aborted; i++) {
+      await waitIfPaused();
+      const job = candidates[i];
+      if (!job.link) continue;
+      try {
+        await chrome.tabs.update(detailTab.id, { url: job.link });
+        await waitTabComplete(detailTab.id, 15000);
+        await sleep(700);
+        if (!await ensureInjected(detailTab.id, 'src/content-search.js')) continue;
+        const result = await sendToTab(detailTab.id, { type: 'READ_DETAIL_SALARY' }, 10000);
+        const floor = salaryFloorK(result && result.salary);
+        if (floor !== null && floor >= minSalary) {
+          job.salary = result.salary;
+          verified.push(job);
+        }
+      } catch (e) {}
+      progress(verified.length, targetCount, '核验薪资');
+      await rand(450, 850);
+    }
+  } finally {
+    if (detailTab && detailTab.id) { try { await chrome.tabs.remove(detailTab.id); } catch (e) {} }
+  }
+  return verified;
+}
+
 // ── 流程：收集 + 筛选 ──
 async function runCollect() {
   if (state.phase === 'collecting' || state.phase === 'screening' || state.phase === 'delivering') { log('已有任务正在运行', 'warn'); return; }
@@ -251,9 +292,11 @@ async function runCollect() {
 
   log('收集岗位中（目标 ' + count + ' 个）...');
   const minSalary = Number(cfg.minSalary) || 0;
-  if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
+  if (minSalary > 0) log('最低月薪详情核验：' + minSalary + 'K（仅保留详情页确认薪资的岗位）');
   // 在不激活的辅助标签页中完成读取，当前 BOSS 页面不会逐页跳转。
-  state.jobs = await collectInHelperTab(cfg, count, minSalary);
+  const candidateCount = minSalary > 0 ? Math.min(400, Math.max(count * 2, count + 50)) : count;
+  const candidates = await collectInHelperTab(cfg, candidateCount, 0);
+  state.jobs = minSalary > 0 ? await verifySalaryInDetails(candidates, minSalary, count) : candidates;
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
   if (!state.jobs.length) { log('未收集到岗位，请放宽关键词/城市或刷新 BOSS 页面', 'warn'); state.phase = 'idle'; pushPhase(); return; }
 
