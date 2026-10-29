@@ -157,6 +157,64 @@ async function ensureTab(url) {
 async function getSearchTab(cfg) { return ensureTab(buildSearchUrl(cfg)); }
 function curUrl(tabId) { return new Promise(res => chrome.tabs.get(tabId, t => res((t && t.url) || ''))); }
 
+async function collectInHelperTab(cfg, count, minSalary) {
+  const jobs = [];
+  const seen = {};
+  let helperTab = null;
+  let emptyPages = 0;
+  const maxPages = Math.min(50, Math.max(2, Math.ceil(count / 10) + 5));
+
+  try {
+    const firstUrl = new URL(buildSearchUrl(cfg));
+    firstUrl.searchParams.set('page', '1');
+    helperTab = await chrome.tabs.create({ url: firstUrl.href, active: false });
+    await waitTabComplete(helperTab.id, 30000);
+    await sleep(1200);
+
+    for (let page = 1; page <= maxPages && jobs.length < count && !state.aborted; page++) {
+      await waitIfPaused();
+      if (page > 1) {
+        const url = new URL(buildSearchUrl(cfg));
+        url.searchParams.set('page', String(page));
+        await chrome.tabs.update(helperTab.id, { url: url.href, active: false });
+        await waitTabComplete(helperTab.id, 30000);
+        await sleep(1000);
+      }
+
+      await ensureInjected(helperTab.id, 'src/content-search.js');
+      let result = await sendToTab(helperTab.id, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
+      if (!result || !result.success) {
+        await sleep(800);
+        await ensureInjected(helperTab.id, 'src/content-search.js');
+        result = await sendToTab(helperTab.id, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
+      }
+      if (!result || !result.success) {
+        emptyPages++;
+        if (emptyPages >= 3) break;
+        continue;
+      }
+
+      let added = 0;
+      for (const job of (result.jobs || [])) {
+        if (!job.id || seen[job.id]) continue;
+        seen[job.id] = true;
+        jobs.push(job);
+        added++;
+        if (jobs.length >= count) break;
+      }
+      progress(jobs.length, count, '收集');
+      emptyPages = added ? 0 : emptyPages + 1;
+      if (emptyPages >= 3) break;
+      await rand(500, 900);
+    }
+  } finally {
+    if (helperTab && helperTab.id) {
+      try { await chrome.tabs.remove(helperTab.id); } catch (e) {}
+    }
+  }
+  return jobs.slice(0, count);
+}
+
 // ── 流程：收集 + 筛选 ──
 async function runCollect() {
   if (state.phase === 'collecting' || state.phase === 'screening' || state.phase === 'delivering') { log('已有任务正在运行', 'warn'); return; }
@@ -171,20 +229,13 @@ async function runCollect() {
   const _c = resolveCity(cfg);
   log('打开搜索页：' + cfg.keyword + ' | 城市：' + (_c.found ? _c.name : '全国'));
   if (cfg.city && !_c.found) log('城市"' + cfg.city + '"未识别，已按全国搜索', 'warn');
-  const tab = await getSearchTab(cfg);
   const count = parseInt(cfg.count) || 20;
 
   log('收集岗位中（目标 ' + count + ' 个）...');
   const minSalary = Number(cfg.minSalary) || 0;
   if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
-  // 在当前搜索页内一次性连续滚动收集，不再由后台逐页刷新。
-  if (!await ensureInjected(tab.id, 'src/content-search.js')) { state.phase = 'idle'; pushPhase(); return; }
-  const collected = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary }, 180000);
-  if (!collected || !collected.success) {
-    log('收集失败：' + ((collected && collected.error) || '页面无响应'), 'error');
-    state.phase = 'idle'; pushPhase(); return;
-  }
-  state.jobs = collected.jobs || [];
+  // 在不激活的辅助标签页中完成读取，当前 BOSS 页面不会逐页跳转。
+  state.jobs = await collectInHelperTab(cfg, count, minSalary);
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
   if (!state.jobs.length) { log('未收集到岗位，请放宽关键词/城市或刷新 BOSS 页面', 'warn'); state.phase = 'idle'; pushPhase(); return; }
 
