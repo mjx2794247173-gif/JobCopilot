@@ -144,7 +144,8 @@
     for (const card of cards) {
       const job = parseCard(card, baseUrl);
       const floor = salaryFloorK(job.salary);
-      const salaryOk = !minSalary || floor === null || floor >= minSalary;
+      // 填了最低月薪即严格筛选：薪资未知也不放行，避免虚拟列表延迟渲染时混入低薪岗位。
+      const salaryOk = !minSalary || (floor !== null && floor >= minSalary);
       if (job.id && salaryOk && !seen[job.id]) {
         seen[job.id] = true;
         jobs.push(job);
@@ -203,7 +204,7 @@
     for (const card of getCards()) {
       const job = parseCard(card);
       const floor = salaryFloorK(job.salary);
-      const salaryOk = !minSalary || floor === null || floor >= minSalary;
+      const salaryOk = !minSalary || (floor !== null && floor >= minSalary);
       if (job.id && salaryOk && !seen[job.id]) {
         seen[job.id] = true;
         jobs.push(job);

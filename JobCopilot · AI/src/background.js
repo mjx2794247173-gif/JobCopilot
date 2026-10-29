@@ -260,7 +260,7 @@ async function runCollect() {
 
   log('收集岗位中（目标 ' + count + ' 个）...');
   const minSalary = Number(cfg.minSalary) || 0;
-  if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
+  if (minSalary > 0) log('最低月薪严格筛选：' + minSalary + 'K（未标薪岗位不保留）');
   // 在不激活的辅助标签页中完成读取，当前 BOSS 页面不会逐页跳转。
   state.jobs = await collectInHelperTab(cfg, count, minSalary);
   // 二次兜底：虚拟列表可能在首帧漏读薪资，最终数据必须再按最低月薪核验一次。
@@ -268,10 +268,10 @@ async function runCollect() {
     const before = state.jobs.length;
     state.jobs = state.jobs.filter(job => {
       const floor = salaryFloorK(job.salary);
-      return floor === null || floor >= minSalary;
+      return floor !== null && floor >= minSalary;
     });
     const removed = before - state.jobs.length;
-    if (removed) log('薪资复核：已剔除 ' + removed + ' 个低于 ' + minSalary + 'K 的岗位', 'info');
+    if (removed) log('薪资复核：已剔除 ' + removed + ' 个低于或未标明 ' + minSalary + 'K 的岗位', 'info');
   }
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
   if (!state.jobs.length) { log('未收集到岗位，请放宽关键词/城市或刷新 BOSS 页面', 'warn'); state.phase = 'idle'; pushPhase(); return; }
