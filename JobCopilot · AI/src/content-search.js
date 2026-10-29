@@ -93,11 +93,6 @@
     const salaryNodes = Array.from(card.querySelectorAll('.job-salary, [class*="salary"], [class*="pay"]'));
     const salEl = salaryNodes.find(el => /(?:\d+(?:\.\d+)?\s*(?:k|K|万)|面议|面谈)/.test(el.textContent || ''))
       || card.querySelector(SELECTORS.jobs.jobSalary);
-    // 部分 BOSS 卡片的薪资不在独立节点中，退回从整张卡片文字提取如“10-15K”。
-    const cardText = (card.innerText || card.textContent || '') + ' ' + (card.outerHTML || '');
-    const salaryMatch = cardText.match(/\d+(?:\.\d+)?\s*(?:[-~—至]\s*\d+(?:\.\d+)?\s*)?(?:k|K|万)(?:\s*[··]?\s*\d+薪)?/)
-      || cardText.match(/\d{4,6}\s*(?:[-~—至]\s*\d{4,6})/);
-    const salaryText = (salEl && salEl.textContent.trim()) || (salaryMatch ? salaryMatch[0].replace(/\s+/g, '') : '');
     const linkEl = card.querySelector('a[href*="/job_detail/"]') || card.querySelector('a[ka][href]') || card.querySelector('a');
     const rawLink = linkEl ? (linkEl.getAttribute('href') || linkEl.href || '') : '';
     let link = '';
@@ -106,7 +101,7 @@
     const companyEl = card.querySelector('.company-name a, .company-name, [class*="company-name"], .boss-info .company-name, .company-info a, [class*="company"] a');
     const companyText = companyEl ? companyEl.textContent.trim() : '';
     const id = (m && m[1]) || link || (
-      (nameEl ? nameEl.textContent.trim() : '') + '|' + companyText + '|' + salaryText
+      (nameEl ? nameEl.textContent.trim() : '') + '|' + companyText + '|' + (salEl ? salEl.textContent.trim() : '')
     );
     const tags = Array.from(card.querySelectorAll(SELECTORS.jobs.tagList)).map(t => t.textContent.trim()).filter(Boolean);
     let company = '';
@@ -114,7 +109,7 @@
     return {
       id: id,
       name: nameEl ? nameEl.textContent.trim() : '未知岗位',
-      salary: salaryText,
+      salary: salEl ? salEl.textContent.trim() : '',
       tags: tags,
       company: company,
       link: link
@@ -128,9 +123,7 @@
     if (!nums || !nums.length) return null;
     const value = Number(nums[0]);
     if (!Number.isFinite(value)) return null;
-    if (/万/.test(s)) return value * 10;
-    // 部分接口以元展示薪资，例如“10000-15000”。统一换算为 K。
-    return value >= 1000 ? value / 1000 : value;
+    return /万/.test(s) ? value * 10 : value;
   }
 
   async function captureJD(card) {
@@ -151,8 +144,7 @@
     for (const card of cards) {
       const job = parseCard(card, baseUrl);
       const floor = salaryFloorK(job.salary);
-      // 填了最低月薪即严格筛选：薪资未知也不放行，避免虚拟列表延迟渲染时混入低薪岗位。
-      const salaryOk = !minSalary || (floor !== null && floor >= minSalary);
+      const salaryOk = !minSalary || floor === null || floor >= minSalary;
       if (job.id && salaryOk && !seen[job.id]) {
         seen[job.id] = true;
         jobs.push(job);
@@ -205,23 +197,19 @@
 
   // 单页快照由后台逐页调用。不要在这个消息处理期间点击分页，
   // 否则页面导航会销毁 content script，导致消息通道提前关闭。
-  function scrapePage(minSalary, withStats) {
+  function scrapePage(minSalary) {
     const jobs = [];
     const seen = {};
-    let total = 0;
-    let salaryKnown = 0;
     for (const card of getCards()) {
-      total++;
       const job = parseCard(card);
       const floor = salaryFloorK(job.salary);
-      if (floor !== null) salaryKnown++;
-      const salaryOk = !minSalary || (floor !== null && floor >= minSalary);
+      const salaryOk = !minSalary || floor === null || floor >= minSalary;
       if (job.id && salaryOk && !seen[job.id]) {
         seen[job.id] = true;
         jobs.push(job);
       }
     }
-    return withStats ? { jobs: jobs, stats: { total: total, salaryKnown: salaryKnown } } : jobs;
+    return jobs;
   }
 
   function findCardByJob(job) {
@@ -326,16 +314,12 @@
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SCRAPE_PAGE') {
-      const page = scrapePage(Number(msg.minSalary) || 0, true);
-      sendResponse({ success: true, jobs: page.jobs, stats: page.stats });
+      sendResponse({ success: true, jobs: scrapePage(Number(msg.minSalary) || 0) });
       return;
     }
     if (msg.type === 'SCROLL_BATCH') {
       loadMoreJobs()
-        .then(advanced => {
-          const page = scrapePage(Number(msg.minSalary) || 0, true);
-          sendResponse({ success: true, advanced: advanced, jobs: page.jobs, stats: page.stats });
-        })
+        .then(advanced => sendResponse({ success: true, advanced: advanced, jobs: scrapePage(Number(msg.minSalary) || 0) }))
         .catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
