@@ -161,26 +161,36 @@ async function collectInHelperTab(cfg, count, minSalary) {
   const jobs = [];
   const seen = {};
   let helperTab = null;
-  let emptyPages = 0;
-  const maxPages = Math.min(50, Math.max(2, Math.ceil(count / 10) + 5));
+  let stalled = 0;
+  const maxBatches = Math.min(160, Math.max(30, count * 2));
 
   try {
     helperTab = await chrome.tabs.create({ url: buildSearchUrl(cfg), active: false });
     await waitTabComplete(helperTab.id, 30000);
     await sleep(1200);
 
-    for (let page = 1; page <= maxPages && jobs.length < count && !state.aborted; page++) {
+    // 先记录首屏，再按小批次滚动虚拟列表；每次消息都在数秒内返回，避免长消息超时。
+    await ensureInjected(helperTab.id, 'src/content-search.js');
+    let first = await sendToTab(helperTab.id, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
+    if (first && first.success) {
+      for (const job of (first.jobs || [])) {
+        if (job.id && !seen[job.id]) { seen[job.id] = true; jobs.push(job); if (jobs.length >= count) break; }
+      }
+      progress(jobs.length, count, '收集');
+    }
+
+    for (let batch = 0; batch < maxBatches && jobs.length < count && !state.aborted; batch++) {
       await waitIfPaused();
       await ensureInjected(helperTab.id, 'src/content-search.js');
-      let result = await sendToTab(helperTab.id, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
+      let result = await sendToTab(helperTab.id, { type: 'SCROLL_BATCH', minSalary: minSalary }, 15000);
       if (!result || !result.success) {
         await sleep(800);
         await ensureInjected(helperTab.id, 'src/content-search.js');
-        result = await sendToTab(helperTab.id, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
+        result = await sendToTab(helperTab.id, { type: 'SCROLL_BATCH', minSalary: minSalary }, 15000);
       }
       if (!result || !result.success) {
-        emptyPages++;
-        if (emptyPages >= 3) break;
+        stalled++;
+        if (stalled >= 4) break;
         continue;
       }
 
@@ -193,14 +203,17 @@ async function collectInHelperTab(cfg, count, minSalary) {
         if (jobs.length >= count) break;
       }
       progress(jobs.length, count, '收集');
-      emptyPages = added ? 0 : emptyPages + 1;
-      if (emptyPages >= 3) break;
+      if (added > 0 || result.advanced) { stalled = 0; continue; }
+      stalled++;
+      if (stalled < 4) continue;
+
+      // 虚拟列表到末尾后，才尝试真实分页控件。
       if (jobs.length >= count) break;
       const next = await sendToTab(helperTab.id, { type: 'NEXT_PAGE' }, 5000);
       if (!next || !next.success) break;
       await waitTabComplete(helperTab.id, 12000);
       await sleep(1600);
-      await rand(500, 900);
+      stalled = 0;
     }
   } finally {
     if (helperTab && helperTab.id) {

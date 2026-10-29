@@ -317,6 +317,12 @@
       sendResponse({ success: true, jobs: scrapePage(Number(msg.minSalary) || 0) });
       return;
     }
+    if (msg.type === 'SCROLL_BATCH') {
+      loadMoreJobs()
+        .then(advanced => sendResponse({ success: true, advanced: advanced, jobs: scrapePage(Number(msg.minSalary) || 0) }))
+        .catch(e => sendResponse({ success: false, error: e.message }));
+      return true;
+    }
     if (msg.type === 'NEXT_PAGE') {
       const next = findNextPageButton();
       if (!next) { sendResponse({ success: false, error: '没有下一页' }); return; }
