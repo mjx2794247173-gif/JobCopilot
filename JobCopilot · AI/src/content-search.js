@@ -85,11 +85,13 @@
     return cardSignature() !== before;
   }
 
-  function parseCard(card) {
+  function parseCard(card, baseUrl) {
     const nameEl = card.querySelector(SELECTORS.jobs.jobName);
     const salEl = card.querySelector(SELECTORS.jobs.jobSalary);
     const linkEl = card.querySelector('a[href*="/job_detail/"]') || card.querySelector('a[ka][href]') || card.querySelector('a');
-    const link = linkEl ? linkEl.href : '';
+    const rawLink = linkEl ? (linkEl.getAttribute('href') || linkEl.href || '') : '';
+    let link = '';
+    try { link = rawLink ? new URL(rawLink, baseUrl || location.origin).href : ''; } catch (e) { link = rawLink; }
     const m = link.match(/job_detail\/([^.?]+)\.html/);
     const companyEl = card.querySelector('.company-name a, .company-name, [class*="company-name"], .boss-info .company-name, .company-info a, [class*="company"] a');
     const companyText = companyEl ? companyEl.textContent.trim() : '';
@@ -132,34 +134,58 @@
     return jd.slice(0, 3000);
   }
 
+  function addCards(cards, baseUrl, minSalary, seen, jobs, count) {
+    let added = 0;
+    for (const card of cards) {
+      const job = parseCard(card, baseUrl);
+      const floor = salaryFloorK(job.salary);
+      const salaryOk = !minSalary || floor === null || floor >= minSalary;
+      if (job.id && salaryOk && !seen[job.id]) {
+        seen[job.id] = true;
+        jobs.push(job);
+        added++;
+        if (jobs.length >= count) break;
+      }
+    }
+    return added;
+  }
+
+  async function fetchSearchPage(page) {
+    const url = new URL(location.href);
+    url.pathname = '/web/geek/jobs';
+    url.searchParams.set('page', String(page));
+    const response = await fetch(url.href, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Accept': 'text/html,application/xhtml+xml' }
+    });
+    if (!response.ok) throw new Error('搜索请求失败 ' + response.status);
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return { cards: Array.from(doc.querySelectorAll(SELECTORS.jobs.jobCard)), url: url.href };
+  }
+
   async function scrape(count, minSalary) {
     const seen = {};
     const jobs = [];
-    let stall = 0;
-    let pages = 1;
-    // 分段遍历虚拟列表；到底后继续翻页，直到达到目标或网站确实没有更多结果。
-    for (let loop = 0; loop < 500 && jobs.length < count; loop++) {
-      const cards = getCards();
-      let added = 0;
-      for (const c of cards) {
-        const j = parseCard(c);
-        const floor = salaryFloorK(j.salary);
-        const salaryOk = !minSalary || floor === null || floor >= minSalary;
-        if (j.id && salaryOk && !seen[j.id]) {
-          seen[j.id] = 1;
-          jobs.push(j); added++;
-          if (jobs.length >= count) break;
-        }
+    addCards(getCards(), location.href, minSalary, seen, jobs, count);
+    chrome.runtime.sendMessage({ type: 'PROGRESS', cur: jobs.length, total: count, label: '收集' }).catch(() => {});
+
+    // 不操作当前页面，静默请求后续搜索结果并合并；用户界面不会逐页跳转。
+    let emptyPages = 0;
+    const maxPages = Math.min(50, Math.max(2, Math.ceil(count / 10) + 5));
+    for (let page = 2; page <= maxPages && jobs.length < count; page++) {
+      try {
+        const result = await fetchSearchPage(page);
+        const added = addCards(result.cards, result.url, minSalary, seen, jobs, count);
+        chrome.runtime.sendMessage({ type: 'PROGRESS', cur: jobs.length, total: count, label: '收集' }).catch(() => {});
+        emptyPages = added ? 0 : emptyPages + 1;
+        if (emptyPages >= 3) break;
+      } catch (e) {
+        emptyPages++;
+        if (emptyPages >= 3) throw e;
       }
-      if (added > 0) chrome.runtime.sendMessage({ type: 'PROGRESS', cur: jobs.length, total: count, label: '收集' }).catch(() => {});
-      if (jobs.length >= count) break;
-      const loaded = await loadMoreJobs();
-      if (added > 0 || loaded) { stall = 0; continue; }
-      stall++;
-      if (stall < 4) { await sleep(600); continue; }
-      if (pages >= 50 || !await goNextPage()) break;
-      pages++;
-      stall = 0;
+      await sleep(350 + Math.random() * 350);
     }
     return jobs.slice(0, count);
   }

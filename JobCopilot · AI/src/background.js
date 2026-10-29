@@ -179,7 +179,7 @@ async function runCollect() {
   if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
   // 在当前搜索页内一次性连续滚动收集，不再由后台逐页刷新。
   if (!await ensureInjected(tab.id, 'src/content-search.js')) { state.phase = 'idle'; pushPhase(); return; }
-  const collected = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary }, 300000);
+  const collected = await sendToTab(tab.id, { type: 'SCRAPE', count: count, minSalary: minSalary }, 180000);
   if (!collected || !collected.success) {
     log('收集失败：' + ((collected && collected.error) || '页面无响应'), 'error');
     state.phase = 'idle'; pushPhase(); return;
