@@ -16,6 +16,11 @@
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+  // 将上传和发送的关键阶段回传到侧栏。简历图片较大或网络较慢时，用户能知道正在等待哪里。
+  function stage(text) {
+    try { chrome.runtime.sendMessage({ type: 'LOG', text: '  ' + text, level: 'info' }); } catch (_) {}
+  }
+
   // 多选择器找第一个可见元素
   function findVisible(selList) {
     for (const sel of selList) {
@@ -81,6 +86,7 @@
 
   async function sendImage(image) {
     if (!image) return true;
+    stage('正在上传简历图片...');
     const input = findVisible(IMG_SELS) || document.querySelector('input[type=file]');
     if (!input) return false;
     const file = dataURLtoFile(image, 'resume.png');
@@ -90,6 +96,7 @@
     setter.call(input, dt.files);
     input.dispatchEvent(new Event('change', { bubbles: true }));
     await sleep(2500);
+    stage('简历图片已提交，准备发送招呼语...');
     return true;
   }
 
@@ -157,9 +164,11 @@
     // 刚从岗位页进入的就是目标会话，不要点击列表第一项，以免投错会话。
     const input = await waitVisible(INPUT_SELS, 12000);
     if (!input) return { success: false, error: '未找到输入框｜' + dumpInputs() };
+    stage('聊天页已就绪...');
     const imgOk = await sendImage(image);
     if (image && !imgOk) return { success: false, error: '未找到简历图片上传控件' };
     await sleep(800);
+    stage('正在填写并发送招呼语...');
     const tr = await sendText(greeting);
     if (!tr.ok) return { success: false, error: tr.err };
     return { success: true, imageOk: imgOk };
