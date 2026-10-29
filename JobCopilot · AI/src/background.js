@@ -323,14 +323,18 @@ async function runDeliver(jobIds) {
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
     if (!jdr.navigated) {
-      const chatResult = await sendToTab(tab.id, { type: 'GO_CHAT', job: job }, 15000);
-      if (!chatResult || !chatResult.success) {
-        recordFail(job, (chatResult && chatResult.error) || '未找到立即沟通按钮');
-        log('  建立联系失败：' + ((chatResult && chatResult.error) || '未找到立即沟通按钮'), 'warn');
+      let enteredChat = false;
+      for (let attempt = 0; attempt < 2 && !enteredChat; attempt++) {
+        const chatResult = await sendToTab(tab.id, { type: 'GO_CHAT', job: job }, 15000);
+        if (chatResult && chatResult.success) enteredChat = await waitForUrlPart(tab.id, '/web/geek/chat', 12000);
+        if (!enteredChat && attempt === 0) { log('  未跳转，重试建立联系...', 'warn'); await sleep(1200); }
+      }
+      if (!enteredChat) {
+        recordFail(job, '未跳转聊天页');
+        log('  未进入聊天页，跳过', 'error');
         progress(k + 1, ids.length, '投递');
         continue;
       }
-      await waitForUrlPart(tab.id, '/web/geek/chat', 20000);
       await sleep(1200);
     } else {
       await waitForUrlPart(tab.id, '/web/geek/chat', 20000);

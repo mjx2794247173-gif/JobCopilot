@@ -235,7 +235,11 @@
         const els = document.querySelectorAll('a, button, span, div');
         for (const el of els) {
           const tx = (el.textContent || '').trim();
-          if (texts.indexOf(tx) >= 0 && el.offsetParent !== null) { clearInterval(iv); resolve(el); return; }
+          if (texts.indexOf(tx) >= 0 && el.offsetParent !== null) {
+            clearInterval(iv);
+            resolve(el.closest('a, button, [role="button"], [class*="btn"]') || el);
+            return;
+          }
         }
         if (Date.now() - t0 > timeout) { clearInterval(iv); resolve(null); }
       }, 200);
@@ -243,18 +247,21 @@
   }
 
   function findChatButton() {
-    const direct = document.querySelector([
-      SELECTORS.jobs.immediateChatBtn,
-      'a[class*="chat"]', 'button[class*="chat"]',
-      '[class*="op-btn"]', '[ka*="chat"]', '[data-ka*="chat"]'
-    ].join(','));
-    if (direct && direct.offsetParent !== null) return direct;
     const elements = document.querySelectorAll('a, button, [role="button"], div, span');
     for (const el of elements) {
       const text = (el.textContent || '').replace(/\s+/g, '').trim();
       if (text !== '立即沟通' && text !== '继续沟通' && text !== '打招呼') continue;
       const clickable = el.closest('a, button, [role="button"], [class*="btn"]') || el;
       if (clickable.offsetParent !== null) return clickable;
+    }
+    const candidates = document.querySelectorAll([
+      SELECTORS.jobs.immediateChatBtn,
+      'a[class*="chat"]', 'button[class*="chat"]', '[class*="op-btn"]',
+      '[ka*="chat"]', '[data-ka*="chat"]'
+    ].join(','));
+    for (const direct of candidates) {
+      const text = (direct.textContent || '').replace(/\s+/g, '').trim();
+      if (direct.offsetParent !== null && /沟通|招呼/.test(text)) return direct;
     }
     return null;
   }
