@@ -290,26 +290,6 @@
     return { success: true, jd: jd.slice(0, 1800) };
   }
 
-  // 200条岗位来自虚拟列表。投递时只作短暂定位；找不到立刻交给详情链接，
-  // 不能让单个岗位在这里占用数分钟。
-  async function locateAndOpenJD(job) {
-    let stalled = 0;
-    for (let i = 0; i < 10; i++) {
-      const card = findCardByJob(job);
-      if (card) return openJD(job);
-      const advanced = await loadMoreJobs();
-      if (advanced) stalled = 0;
-      else if (++stalled >= 5) break;
-    }
-    return { success: false, error: '搜索列表未找到岗位卡片' };
-  }
-
-  async function openDirect(job) {
-    const det = document.querySelector('.job-detail-box, [class*="job-detail"], .detail-content, .job-detail');
-    const jd = det ? (det.innerText || '').trim().slice(0, 3000) : '';
-    return { success: true, jd: jd, navigated: false };
-  }
-
   // 卡片已打开 → 点立即沟通 → 弹窗点"继续沟通"（跳转聊天页）
   async function goChat(job) {
     let btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 5000);
@@ -353,14 +333,6 @@
     }
     if (msg.type === 'OPEN_JD') {
       openJD(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
-      return true;
-    }
-    if (msg.type === 'OPEN_JD_FROM_LIST') {
-      locateAndOpenJD(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
-      return true;
-    }
-    if (msg.type === 'OPEN_DIRECT') {
-      openDirect(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
     if (msg.type === 'GO_CHAT' || msg.type === 'INITIATE' || msg.type === 'CREATE_CONV') {

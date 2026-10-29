@@ -3,23 +3,7 @@
   if (window.__bossToudiChat) return;
   window.__bossToudiChat = true;
 
-  // 与搜索页一样保持脚本自包含，避免详情页/聊天页跳转后的注入时序问题。
-  const SELECTORS = globalThis.SELECTORS || {
-    chat: {
-      userList: '.user-list-content li',
-      chatInput: 'div#chat-input.chat-input',
-      btnSend: 'button.btn-send',
-      imageUpload: '.btn-sendimg input[type=file]',
-      messageSent: '.item-myself'
-    }
-  };
-
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-  // 将上传和发送的关键阶段回传到侧栏。简历图片较大或网络较慢时，用户能知道正在等待哪里。
-  function stage(text) {
-    try { chrome.runtime.sendMessage({ type: 'LOG', text: '  ' + text, level: 'info' }); } catch (_) {}
-  }
 
   // 多选择器找第一个可见元素
   function findVisible(selList) {
@@ -56,7 +40,6 @@
 
   function dataURLtoFile(dataUrl, name) {
     const parts = dataUrl.split(',');
-    if (parts.length !== 2 || !parts[0].match(/:(.*?);/) || !parts[1]) throw new Error('简历图片数据无效');
     const mime = parts[0].match(/:(.*?);/)[1];
     const bin = atob(parts[1]);
     const arr = new Uint8Array(bin.length);
@@ -86,7 +69,6 @@
 
   async function sendImage(image) {
     if (!image) return true;
-    stage('正在上传简历图片...');
     const input = findVisible(IMG_SELS) || document.querySelector('input[type=file]');
     if (!input) return false;
     const file = dataURLtoFile(image, 'resume.png');
@@ -96,7 +78,6 @@
     setter.call(input, dt.files);
     input.dispatchEvent(new Event('change', { bubbles: true }));
     await sleep(2500);
-    stage('简历图片已提交，准备发送招呼语...');
     return true;
   }
 
@@ -127,19 +108,14 @@
     if (!inputText(input).trim()) return { ok: false, err: '文字未填入输入框' };
 
     const before = document.querySelectorAll(SELECTORS.chat.messageSent).length;
-    // 以回车为主发送。不要同时点击发送按钮，否则某些页面会重复发送。
+    // 以回车为主发送
     pressEnter(input);
-
-    // 先等待回车结果；若仍未发送，再只点击一次按钮兜底。
-    for (let i = 0; i < 6; i++) {
-      await sleep(300);
-      const cleared = !inputText(input).trim();
-      const after = document.querySelectorAll(SELECTORS.chat.messageSent).length;
-      if (cleared || after > before) return { ok: true };
-    }
+    // 兜底：若有发送按钮也点一下
     const btn = findVisible(SEND_SELS);
     if (btn && !btn.classList.contains('disabled') && !btn.disabled) btn.click();
-    for (let i = 0; i < 8; i++) {
+
+    // 验证：输入框被清空 或 新增自己消息气泡 => 成功
+    for (let i = 0; i < 12; i++) {
       await sleep(300);
       const cleared = !inputText(input).trim();
       const after = document.querySelectorAll(SELECTORS.chat.messageSent).length;
@@ -152,7 +128,6 @@
     const oc = await openConversation(msg.company, msg.hrName, msg.position);
     if (!oc.ok) return { success: false, error: oc.err };
     const imgOk = await sendImage(msg.image);
-    if (msg.image && !imgOk) return { success: false, error: '未找到简历图片上传控件' };
     await sleep(800);
     const tr = await sendText(msg.greeting);
     if (!tr.ok) return { success: false, error: tr.err };
@@ -161,14 +136,15 @@
 
   // 发给当前已打开的会话（点继续沟通后跳进来的就是目标岗位，无需匹配）
   async function sendActive(image, greeting) {
-    // 刚从岗位页进入的就是目标会话，不要点击列表第一项，以免投错会话。
-    const input = await waitVisible(INPUT_SELS, 12000);
+    let input = await waitVisible(INPUT_SELS, 6000);
+    if (!input) {
+      const items = document.querySelectorAll(SELECTORS.chat.userList);
+      if (items[0]) { items[0].click(); await sleep(1500); }
+      input = await waitVisible(INPUT_SELS, 6000);
+    }
     if (!input) return { success: false, error: '未找到输入框｜' + dumpInputs() };
-    stage('聊天页已就绪...');
     const imgOk = await sendImage(image);
-    if (image && !imgOk) return { success: false, error: '未找到简历图片上传控件' };
     await sleep(800);
-    stage('正在填写并发送招呼语...');
     const tr = await sendText(greeting);
     if (!tr.ok) return { success: false, error: tr.err };
     return { success: true, imageOk: imgOk };

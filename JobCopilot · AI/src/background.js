@@ -99,10 +99,6 @@ async function ensureInjected(tabId, file) {
   }
   catch (e) { log('页面脚本注入失败：' + e.message, 'error'); return false; }
 }
-async function ensureDirectInjected(tabId) {
-  try { await chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['src/selectors.js', 'src/content-search.js'] }); return true; }
-  catch (e) { log('详情页脚本注入失败：' + e.message, 'error'); return false; }
-}
 function sendToTab(tabId, msg, timeoutMs) {
   return new Promise((resolve) => {
     let settled = false;
@@ -304,27 +300,12 @@ async function runDeliver(jobIds) {
     if (!job) { log('[' + (k + 1) + '/' + ids.length + '] 找不到岗位数据，跳过', 'warn'); continue; }
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
-    // 1. 恢复原版路径：在搜索列表中定位岗位卡片，再打开右侧详情。
-    let tab = await ensureTab(searchUrl);
-    if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
+    // 1. 原版路径：回搜索页，点开岗位卡片读取完整 JD。
+    const tab = await ensureTab(searchUrl);
+    await ensureInjected(tab.id, 'src/content-search.js');
     log('  读取岗位JD...');
-    // 搜索页虚拟列表只短暂尝试定位；超过约 20 秒改走岗位详情链接。
-    let jdr = await sendToTab(tab.id, { type: 'OPEN_JD_FROM_LIST', job: job }, 20000);
-    if (!jdr || !jdr.success) {
-      if (job.link) {
-        log('  搜索列表未找到岗位，改用详情链接读取JD...', 'warn');
-        await chrome.tabs.update(tab.id, { url: job.link });
-        await waitTabComplete(tab.id);
-        if (await ensureDirectInjected(tab.id)) jdr = await sendToTab(tab.id, { type: 'OPEN_DIRECT', job: job }, 20000);
-      }
-    }
-    if (!jdr || !jdr.success) {
-      recordFail(job, (jdr && jdr.error) || '读取岗位JD失败');
-      log('  读取JD失败，跳过：' + ((jdr && jdr.error) || '未知错误'), 'warn');
-      progress(k + 1, ids.length, '投递');
-      continue;
-    }
-    const jd = jdr.jd || '';
+    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
+    const jd = (jdr && jdr.jd) || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
     log('  AI生成专属招呼语...');
@@ -334,7 +315,7 @@ async function runDeliver(jobIds) {
 
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
-    await sendToTab(tab.id, { type: 'GO_CHAT', job: job }, 15000);
+    await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
     await waitTabComplete(tab.id); await sleep(2500);
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
@@ -342,8 +323,7 @@ async function runDeliver(jobIds) {
     if (u.indexOf('/web/geek/chat') < 0) { recordFail(job, '未跳转聊天页'); log('  未进入聊天页，跳过', 'error'); progress(k + 1, ids.length, '投递'); continue; }
     await ensureInjected(tab.id, 'src/content-chat.js');
     log('  发简历图片 + 招呼语...');
-      // 简历图片上传受页面和网络影响较大，保留原发送流程，仅放宽等待时间。
-      const r = await sendToTab(tab.id, { type: 'SEND_ACTIVE', image: cfg.resumeImage || '', greeting: greeting }, 90000);
+    const r = await sendToTab(tab.id, { type: 'SEND_ACTIVE', image: cfg.resumeImage || '', greeting: greeting });
     if (r && r.success) { recordOk(job); state.processed[job.id] = 1; await chrome.storage.local.set({ processed: state.processed }); log('  ✓ 投递成功', 'success'); }
     else { recordFail(job, (r && r.error) || '发送失败'); log('  失败：' + (r && r.error), 'error'); }
     progress(k + 1, ids.length, '投递');
@@ -363,11 +343,6 @@ function finishDeliver() {
 
 // ── 消息入口 ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // content script 的阶段提示转发给侧栏展示。
-  if (msg.type === 'LOG' && sender.tab) {
-    chrome.runtime.sendMessage({ type: 'LOG', text: msg.text, level: msg.level || 'info' }).catch(() => {});
-    return;
-  }
   if (msg.type === 'START_COLLECT') { runCollect(); sendResponse({ ok: true }); return; }
   if (msg.type === 'START_DELIVER') { runDeliver(msg.jobIds); sendResponse({ ok: true }); return; }
   if (msg.type === 'PAUSE') { state.paused = true; log('已暂停', 'warn'); sendResponse({ ok: true }); return; }
