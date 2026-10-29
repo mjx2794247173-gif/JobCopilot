@@ -103,7 +103,8 @@ function sendToTab(tabId, msg, timeoutMs) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
-    const timer = setTimeout(() => finish({ success: false, error: '页面响应超时（' + (msg.type || '未知操作') + '）' }), timeoutMs || 15000);
+    // 未指定超时时沿用原版投递行为；收集辅助页均显式指定超时。
+    const timer = timeoutMs ? setTimeout(() => finish({ success: false, error: '页面响应超时（' + (msg.type || '未知操作') + '）' }), timeoutMs) : null;
     chrome.tabs.sendMessage(tabId, msg, (resp) => {
       clearTimeout(timer);
       if (chrome.runtime.lastError) finish({ success: false, error: chrome.runtime.lastError.message });
@@ -118,7 +119,7 @@ function waitTabComplete(tabId, timeoutMs) {
     function lis(id, info) { if (id === tabId && info.status === 'complete') setTimeout(finish, 1200); }
     chrome.tabs.onUpdated.addListener(lis);
     chrome.tabs.get(tabId, (t) => { if (t && t.status === 'complete') setTimeout(finish, 1200); });
-    setTimeout(finish, timeoutMs || 25000);
+    if (timeoutMs) setTimeout(finish, timeoutMs);
   });
 }
 async function waitForUrlPart(tabId, part, timeoutMs) {
