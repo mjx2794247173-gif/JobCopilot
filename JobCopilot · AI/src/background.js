@@ -321,7 +321,7 @@ async function runDeliver(jobIds) {
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
     // 1. 原版路径：回搜索页，点开岗位卡片读取完整 JD。
-    const tab = await ensureTab(searchUrl);
+    let tab = await ensureTab(searchUrl);
     await ensureInjected(tab.id, 'src/content-search.js');
     log('  读取岗位JD...');
     const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
@@ -335,8 +335,15 @@ async function runDeliver(jobIds) {
 
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
+    const existingChats = await chrome.tabs.query({ url: '*://*.zhipin.com/web/geek/chat*' });
     await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
-    await waitTabComplete(tab.id); await sleep(2500);
+    const chatTab = await waitForChatDestination(tab.id, existingChats.map(t => t.id), 20000);
+    if (chatTab) {
+      tab = chatTab;
+      if (chatTab.id !== existingChats.find(t => t.id === chatTab.id)?.id) log('  已切换到新打开的聊天页...', 'info');
+      await waitTabComplete(tab.id, 12000);
+      await sleep(1200);
+    }
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
     const u = await curUrl(tab.id);
