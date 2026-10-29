@@ -89,7 +89,10 @@
 
   function parseCard(card, baseUrl) {
     const nameEl = card.querySelector(SELECTORS.jobs.jobName);
-    const salEl = card.querySelector(SELECTORS.jobs.jobSalary);
+    // BOSS 虚拟列表偶尔会先创建空的 .job-salary 再填内容；优先取带薪资文本的节点。
+    const salaryNodes = Array.from(card.querySelectorAll('.job-salary, [class*="salary"], [class*="pay"]'));
+    const salEl = salaryNodes.find(el => /(?:\d+(?:\.\d+)?\s*(?:k|K|万)|面议|面谈)/.test(el.textContent || ''))
+      || card.querySelector(SELECTORS.jobs.jobSalary);
     const linkEl = card.querySelector('a[href*="/job_detail/"]') || card.querySelector('a[ka][href]') || card.querySelector('a');
     const rawLink = linkEl ? (linkEl.getAttribute('href') || linkEl.href || '') : '';
     let link = '';

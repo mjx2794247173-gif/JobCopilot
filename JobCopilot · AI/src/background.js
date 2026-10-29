@@ -34,6 +34,15 @@ function progress(cur, total, label) { chrome.runtime.sendMessage({ type: 'PROGR
 async function waitIfPaused() { while (state.paused && !state.aborted) await sleep(400); }
 function getCfg() { return chrome.storage.local.get(['dsKey', 'resumeText', 'resumeImage', 'city', 'keyword', 'minSalary', 'count']); }
 function resumeFull(cfg) { return (cfg.resumeText || '').trim(); }
+function salaryFloorK(text) {
+  const s = String(text || '').replace(/,/g, '').toLowerCase();
+  if (!s || /面议|面谈|不限/.test(s)) return null;
+  const nums = s.match(/\d+(?:\.\d+)?/g);
+  if (!nums || !nums.length) return null;
+  const value = Number(nums[0]);
+  if (!Number.isFinite(value)) return null;
+  return /万/.test(s) ? value * 10 : value;
+}
 function jobInfo(j) {
   const jd = (j.jd || '').trim();
   const compactJD = jd.length > 1200 ? jd.slice(0, 1200) + '\n（JD较长，初筛仅使用前1200字）' : jd;
@@ -254,6 +263,16 @@ async function runCollect() {
   if (minSalary > 0) log('最低月薪筛选：' + minSalary + 'K（未标薪岗位保留）');
   // 在不激活的辅助标签页中完成读取，当前 BOSS 页面不会逐页跳转。
   state.jobs = await collectInHelperTab(cfg, count, minSalary);
+  // 二次兜底：虚拟列表可能在首帧漏读薪资，最终数据必须再按最低月薪核验一次。
+  if (minSalary > 0) {
+    const before = state.jobs.length;
+    state.jobs = state.jobs.filter(job => {
+      const floor = salaryFloorK(job.salary);
+      return floor === null || floor >= minSalary;
+    });
+    const removed = before - state.jobs.length;
+    if (removed) log('薪资复核：已剔除 ' + removed + ' 个低于 ' + minSalary + 'K 的岗位', 'info');
+  }
   log('收集到 ' + state.jobs.length + ' 个岗位', 'success');
   if (!state.jobs.length) { log('未收集到岗位，请放宽关键词/城市或刷新 BOSS 页面', 'warn'); state.phase = 'idle'; pushPhase(); return; }
 
