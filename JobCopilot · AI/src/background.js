@@ -89,7 +89,7 @@ async function screenJob(cfg, job) {
 
 // 投递时：结合该岗位的【完整JD】+ 简历，现场生成专属招呼语
 async function genGreetingFromJD(cfg, job, jd) {
-  const sys = '你是求职者本人，在BOSS直聘给HR发招呼语。回复会原样发给HR，严禁任何注释、说明、括号备注、字数统计或引导语。\n【固定内容】必须以这段内容开头，不能改写、删减或调整顺序："您好，我本科毕业于辽宁大学（211、双一流）金融学专业，目前在德国柏林洪堡大学（U.S.News世界排名51）攻读硕士，预计2027年7月毕业。目前在京东集团（总部）实习，担任业务拓展—AI应用与数据产品方向实习生，参与经营分析看板与AI虚假拜访识别落地；此前在德国Consultport GmbH咨询公司参与AI经营分析助手项目。独立搭建基于AI Agent的省区拜访质量智能分析助手，服务50余名省市管理人员。"\n【JD个性化】固定内容后，最后用1句话只围绕JD最关键的1-2项职责或要求，说明上述经历如何匹配，并表达希望沟通机会。只写简历中真实存在的内容，不得编造。\n【表达优先级】京东集团（总部）、个人AI Agent项目、AI应用落地、数据分析与业务价值优先。不要把Python、SQL作为开头或主要卖点；仅当JD明确要求时，才可作为辅助能力简短提及。\n【长度】全文190-240字，真诚自然，避免堆砌技术名词。';
+  const sys = '你是求职者本人，在BOSS直聘给HR发招呼语。回复会原样发给HR，严禁任何注释、说明、括号备注、字数统计或引导语。\n【固定开头】必须以这句话开头，不能改写或省略："您好，我本科毕业于辽宁大学（211、双一流）金融学专业，目前在德国柏林洪堡大学攻读农业经济学硕士，预计2027年7月毕业。"\n【核心经历】固定开头后，精炼写：目前在京东集团总部京东物流运营部实习，岗位为业务拓展—AI应用与数据产品方向，负责经营分析看板与AI虚假拜访识别的落地；此前在德国Consultport GmbH咨询公司参与AI经营分析助手项目；独立搭建基于AI Agent的省区拜访质量智能分析助手，服务50余名省市管理人员。\n【JD个性化】最后用1句话只围绕JD最关键的1-2项职责或要求，说明上述经历如何匹配，并表达希望沟通机会。只写简历中真实存在的内容，不得编造。\n【表达优先级】京东集团总部、个人AI Agent项目、AI应用落地、数据分析与业务价值优先。不要把Python、SQL作为开头或主要卖点；仅当JD明确要求时，才可作为辅助能力简短提及。\n【长度】全文145-185字，真诚自然，避免堆砌技术名词。';
   const jdText = (jd && jd.trim()) ? jd.trim() : ('技能标签：' + (job.tags || []).join('、'));
   const user = '我的简历：\n' + resumeFull(cfg) + '\n\n目标岗位：' + (job.name || '') + (job.company ? ('（' + job.company + '）') : '') + '\n该岗位JD：\n' + jdText + '\n\n请严格按固定开头和后续内容要求生成一段招呼语，直接输出招呼语本身，不要任何多余内容。';
   const raw = await callDS([{ role: 'system', content: sys }, { role: 'user', content: user }], 300);
@@ -321,7 +321,7 @@ async function runDeliver(jobIds) {
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
     // 1. 原版路径：回搜索页，点开岗位卡片读取完整 JD。
-    let tab = await ensureTab(searchUrl);
+    const tab = await ensureTab(searchUrl);
     await ensureInjected(tab.id, 'src/content-search.js');
     log('  读取岗位JD...');
     const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
@@ -335,15 +335,8 @@ async function runDeliver(jobIds) {
 
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
-    const existingChats = await chrome.tabs.query({ url: '*://*.zhipin.com/web/geek/chat*' });
     await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
-    const chatTab = await waitForChatDestination(tab.id, existingChats.map(t => t.id), 20000);
-    if (chatTab) {
-      tab = chatTab;
-      if (chatTab.id !== existingChats.find(t => t.id === chatTab.id)?.id) log('  已切换到新打开的聊天页...', 'info');
-      await waitTabComplete(tab.id, 12000);
-      await sleep(1200);
-    }
+    await waitTabComplete(tab.id); await sleep(2500);
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
     const u = await curUrl(tab.id);
