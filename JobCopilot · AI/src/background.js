@@ -308,7 +308,8 @@ async function runDeliver(jobIds) {
     let tab = await ensureTab(searchUrl);
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
-    let jdr = await sendToTab(tab.id, { type: 'OPEN_JD_FROM_LIST', job: job }, 120000);
+    // 搜索页虚拟列表只短暂尝试定位；超过约 20 秒改走岗位详情链接。
+    let jdr = await sendToTab(tab.id, { type: 'OPEN_JD_FROM_LIST', job: job }, 20000);
     if (!jdr || !jdr.success) {
       if (job.link) {
         log('  搜索列表未找到岗位，改用详情链接读取JD...', 'warn');

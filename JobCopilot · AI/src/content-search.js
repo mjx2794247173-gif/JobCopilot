@@ -290,10 +290,11 @@
     return { success: true, jd: jd.slice(0, 1800) };
   }
 
-  // 200条岗位来自虚拟列表，投递时需先在搜索页滚动回目标卡片。
+  // 200条岗位来自虚拟列表。投递时只作短暂定位；找不到立刻交给详情链接，
+  // 不能让单个岗位在这里占用数分钟。
   async function locateAndOpenJD(job) {
     let stalled = 0;
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 10; i++) {
       const card = findCardByJob(job);
       if (card) return openJD(job);
       const advanced = await loadMoreJobs();
