@@ -335,28 +335,8 @@ async function runDeliver(jobIds) {
 
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
-    if (!jdr.navigated) {
-      let enteredChat = false;
-      for (let attempt = 0; attempt < 2 && !enteredChat; attempt++) {
-        const beforeChats = await chrome.tabs.query({ url: '*://*.zhipin.com/web/geek/chat*' });
-        const chatResult = await sendToTab(tab.id, { type: 'GO_CHAT', job: job }, 15000);
-        if (chatResult && chatResult.success) {
-          const destination = await waitForChatDestination(tab.id, beforeChats.map(t => t.id), 12000);
-          if (destination) { tab = destination; enteredChat = true; }
-        }
-        if (!enteredChat && attempt === 0) { log('  未跳转，重试建立联系...', 'warn'); await sleep(1200); }
-      }
-      if (!enteredChat) {
-        recordFail(job, '未跳转聊天页');
-        log('  未进入聊天页，跳过', 'error');
-        progress(k + 1, ids.length, '投递');
-        continue;
-      }
-      await sleep(1200);
-    } else {
-      await waitForUrlPart(tab.id, '/web/geek/chat', 20000);
-      await sleep(1200);
-    }
+    await sendToTab(tab.id, { type: 'GO_CHAT', job: job }, 15000);
+    await waitTabComplete(tab.id); await sleep(2500);
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
     const u = await curUrl(tab.id);
