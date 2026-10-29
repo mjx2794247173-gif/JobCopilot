@@ -165,22 +165,12 @@ async function collectInHelperTab(cfg, count, minSalary) {
   const maxPages = Math.min(50, Math.max(2, Math.ceil(count / 10) + 5));
 
   try {
-    const firstUrl = new URL(buildSearchUrl(cfg));
-    firstUrl.searchParams.set('page', '1');
-    helperTab = await chrome.tabs.create({ url: firstUrl.href, active: false });
+    helperTab = await chrome.tabs.create({ url: buildSearchUrl(cfg), active: false });
     await waitTabComplete(helperTab.id, 30000);
     await sleep(1200);
 
     for (let page = 1; page <= maxPages && jobs.length < count && !state.aborted; page++) {
       await waitIfPaused();
-      if (page > 1) {
-        const url = new URL(buildSearchUrl(cfg));
-        url.searchParams.set('page', String(page));
-        await chrome.tabs.update(helperTab.id, { url: url.href, active: false });
-        await waitTabComplete(helperTab.id, 30000);
-        await sleep(1000);
-      }
-
       await ensureInjected(helperTab.id, 'src/content-search.js');
       let result = await sendToTab(helperTab.id, { type: 'SCRAPE_PAGE', minSalary: minSalary }, 15000);
       if (!result || !result.success) {
@@ -205,6 +195,11 @@ async function collectInHelperTab(cfg, count, minSalary) {
       progress(jobs.length, count, '收集');
       emptyPages = added ? 0 : emptyPages + 1;
       if (emptyPages >= 3) break;
+      if (jobs.length >= count) break;
+      const next = await sendToTab(helperTab.id, { type: 'NEXT_PAGE' }, 5000);
+      if (!next || !next.success) break;
+      await waitTabComplete(helperTab.id, 12000);
+      await sleep(1600);
       await rand(500, 900);
     }
   } finally {

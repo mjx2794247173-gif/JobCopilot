@@ -48,7 +48,9 @@
     }
     return Array.from(document.querySelectorAll('a, button')).find(el => {
       const text = (el.textContent || '').trim();
-      return (text === '下一页' || text === '下页' || text === '>') && el.offsetParent !== null && !el.disabled;
+      const label = ((el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).toLowerCase();
+      return (text === '下一页' || text === '下页' || text === '>' || /next|下一页/.test(label))
+        && el.offsetParent !== null && !el.disabled && !/disabled|disable/.test(el.className || '');
     }) || null;
   }
 
@@ -313,6 +315,13 @@
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SCRAPE_PAGE') {
       sendResponse({ success: true, jobs: scrapePage(Number(msg.minSalary) || 0) });
+      return;
+    }
+    if (msg.type === 'NEXT_PAGE') {
+      const next = findNextPageButton();
+      if (!next) { sendResponse({ success: false, error: '没有下一页' }); return; }
+      setTimeout(() => next.click(), 50);
+      sendResponse({ success: true });
       return;
     }
     if (msg.type === 'SCRAPE') {
