@@ -134,6 +134,19 @@ async function waitForUrlPart(tabId, part, timeoutMs) {
   }
   return false;
 }
+async function waitForChatDestination(originalTabId, knownChatTabIds, timeoutMs) {
+  const end = Date.now() + (timeoutMs || 15000);
+  const known = new Set(knownChatTabIds || []);
+  while (Date.now() < end) {
+    const originalUrl = await curUrl(originalTabId);
+    if (originalUrl.indexOf('/web/geek/chat') >= 0) return chrome.tabs.get(originalTabId);
+    const chats = await chrome.tabs.query({ url: '*://*.zhipin.com/web/geek/chat*' });
+    const newChat = chats.find(t => !known.has(t.id));
+    if (newChat) return newChat;
+    await sleep(300);
+  }
+  return null;
+}
 function resolveCity(cfg) {
   const firstCity = (cfg.city || '').split(/[\/、,，\s]+/)[0].replace(/[市省]$/, '') || '';
   const code = (typeof CITY_MAP !== 'undefined' && CITY_MAP[firstCity]) || '100010000';
@@ -292,7 +305,7 @@ async function runDeliver(jobIds) {
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
     // 1. 优先直接打开收集时保存的岗位详情链接，避免跨页后找不到原卡片。
-    const tab = await ensureTab(job.link || searchUrl);
+    let tab = await ensureTab(job.link || searchUrl);
     if (!await ensureInjected(tab.id, 'src/content-search.js')) { recordFail(job, '页面脚本注入失败'); progress(k + 1, ids.length, '投递'); continue; }
     log('  读取岗位JD...');
     let jdr = job.link
@@ -325,8 +338,12 @@ async function runDeliver(jobIds) {
     if (!jdr.navigated) {
       let enteredChat = false;
       for (let attempt = 0; attempt < 2 && !enteredChat; attempt++) {
+        const beforeChats = await chrome.tabs.query({ url: '*://*.zhipin.com/web/geek/chat*' });
         const chatResult = await sendToTab(tab.id, { type: 'GO_CHAT', job: job }, 15000);
-        if (chatResult && chatResult.success) enteredChat = await waitForUrlPart(tab.id, '/web/geek/chat', 12000);
+        if (chatResult && chatResult.success) {
+          const destination = await waitForChatDestination(tab.id, beforeChats.map(t => t.id), 12000);
+          if (destination) { tab = destination; enteredChat = true; }
+        }
         if (!enteredChat && attempt === 0) { log('  未跳转，重试建立联系...', 'warn'); await sleep(1200); }
       }
       if (!enteredChat) {
