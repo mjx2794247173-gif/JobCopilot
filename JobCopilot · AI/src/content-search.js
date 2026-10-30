@@ -1,7 +1,13 @@
 // ===== 搜索页 content script：收集岗位 + 建立联系（立即沟通→继续沟通跳聊天页）=====
 (function () {
-  if (window.__bossToudiSearch) return;
+  // 扩展重新加载后，旧内容脚本的标记仍在，但旧 runtime 已失效。
+  const runtime = globalThis.chrome && chrome.runtime;
+  if (!runtime || !runtime.onMessage) return;
+  let oldContextAlive = false;
+  try { oldContextAlive = typeof window.__bossToudiSearchAlive === 'function' && !!window.__bossToudiSearchAlive(); } catch (e) {}
+  if (window.__bossToudiSearch && oldContextAlive) return;
   window.__bossToudiSearch = true;
+  window.__bossToudiSearchAlive = () => runtime.id;
 
   // 详情页可能由后台直接打开，manifest 尚未完成 selectors.js 注入。
   // 使用脚本内兜底，避免因注入时序出现 SELECTORS is not defined。
@@ -312,7 +318,7 @@
     return { success: true, navigated: false };
   }
 
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SCRAPE_PAGE') {
       sendResponse({ success: true, jobs: scrapePage(Number(msg.minSalary) || 0) });
       return;

@@ -127,7 +127,10 @@ function waitTabComplete(tabId, timeoutMs) {
     const finish = () => { if (!settled) { settled = true; chrome.tabs.onUpdated.removeListener(lis); resolve(); } };
     function lis(id, info) { if (id === tabId && info.status === 'complete') setTimeout(finish, 1200); }
     chrome.tabs.onUpdated.addListener(lis);
-    chrome.tabs.get(tabId, (t) => { if (t && t.status === 'complete') setTimeout(finish, 1200); });
+    chrome.tabs.get(tabId, (t) => {
+      if (chrome.runtime.lastError) { finish(); return; }
+      if (t && t.status === 'complete') setTimeout(finish, 1200);
+    });
     if (timeoutMs) setTimeout(finish, timeoutMs);
   });
 }
@@ -174,7 +177,12 @@ async function ensureTab(url) {
   return tab;
 }
 async function getSearchTab(cfg) { return ensureTab(buildSearchUrl(cfg)); }
-function curUrl(tabId) { return new Promise(res => chrome.tabs.get(tabId, t => res((t && t.url) || ''))); }
+function curUrl(tabId) {
+  return new Promise(res => chrome.tabs.get(tabId, t => {
+    if (chrome.runtime.lastError) { res(''); return; }
+    res((t && t.url) || '');
+  }));
+}
 
 async function collectInHelperTab(cfg, count, minSalary) {
   const jobs = [];

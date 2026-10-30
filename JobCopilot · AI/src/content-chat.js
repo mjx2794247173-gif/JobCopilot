@@ -1,7 +1,12 @@
 // ===== 聊天页 content script：打开会话 + 先发图片 + 再发招呼语 =====
 (function () {
-  if (window.__bossToudiChat) return;
+  const runtime = globalThis.chrome && chrome.runtime;
+  if (!runtime || !runtime.onMessage) return;
+  let oldContextAlive = false;
+  try { oldContextAlive = typeof window.__bossToudiChatAlive === 'function' && !!window.__bossToudiChatAlive(); } catch (e) {}
+  if (window.__bossToudiChat && oldContextAlive) return;
   window.__bossToudiChat = true;
+  window.__bossToudiChatAlive = () => runtime.id;
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -150,7 +155,7 @@
     return { success: true, imageOk: imgOk };
   }
 
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SEND') {
       doSend(msg).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
