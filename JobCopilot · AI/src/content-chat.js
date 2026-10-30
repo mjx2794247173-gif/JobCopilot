@@ -155,7 +155,7 @@
     return { success: true, imageOk: imgOk };
   }
 
-  runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (runtime && runtime.onMessage && typeof runtime.onMessage.addListener === 'function') runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SEND') {
       doSend(msg).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;

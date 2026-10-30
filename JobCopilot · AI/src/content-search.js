@@ -318,7 +318,8 @@
     return { success: true, navigated: false };
   }
 
-  runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // 执行期间扩展也可能被重载；注册监听器前再次确认 runtime 仍有效。
+  if (runtime && runtime.onMessage && typeof runtime.onMessage.addListener === 'function') runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SCRAPE_PAGE') {
       sendResponse({ success: true, jobs: scrapePage(Number(msg.minSalary) || 0) });
       return;
