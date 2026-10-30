@@ -1,8 +1,13 @@
 // ===== 搜索页 content script：收集岗位 + 建立联系（立即沟通→继续沟通跳聊天页）=====
 (function () {
   // 扩展重新加载后，旧内容脚本的标记仍在，但旧 runtime 已失效。
-  const runtime = globalThis.chrome && chrome.runtime;
-  if (!runtime || !runtime.onMessage) return;
+  let runtime, messageChannel;
+  try {
+    runtime = globalThis.chrome && chrome.runtime;
+    // 扩展重载时 runtime 对象可能在同一段脚本执行中被失效；只读取一次。
+    messageChannel = runtime && runtime.onMessage;
+  } catch (e) { return; }
+  if (!runtime || !messageChannel || typeof messageChannel.addListener !== 'function') return;
   let oldContextAlive = false;
   try { oldContextAlive = typeof window.__bossToudiSearchAlive === 'function' && !!window.__bossToudiSearchAlive(); } catch (e) {}
   if (window.__bossToudiSearch && oldContextAlive) return;
@@ -318,8 +323,8 @@
     return { success: true, navigated: false };
   }
 
-  // 执行期间扩展也可能被重载；注册监听器前再次确认 runtime 仍有效。
-  if (runtime && runtime.onMessage && typeof runtime.onMessage.addListener === 'function') runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // 使用启动时取得的监听器引用，避免重载瞬间重复访问 runtime.onMessage。
+  try { messageChannel.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SCRAPE_PAGE') {
       sendResponse({ success: true, jobs: scrapePage(Number(msg.minSalary) || 0) });
       return;
@@ -349,5 +354,5 @@
       goChat(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
-  });
+  }); } catch (e) {}
 })();

@@ -1,7 +1,12 @@
 // ===== 聊天页 content script：打开会话 + 先发图片 + 再发招呼语 =====
 (function () {
-  const runtime = globalThis.chrome && chrome.runtime;
-  if (!runtime || !runtime.onMessage) return;
+  let runtime, messageChannel;
+  try {
+    runtime = globalThis.chrome && chrome.runtime;
+    // 扩展重载时 runtime 对象可能在同一段脚本执行中被失效；只读取一次。
+    messageChannel = runtime && runtime.onMessage;
+  } catch (e) { return; }
+  if (!runtime || !messageChannel || typeof messageChannel.addListener !== 'function') return;
   let oldContextAlive = false;
   try { oldContextAlive = typeof window.__bossToudiChatAlive === 'function' && !!window.__bossToudiChatAlive(); } catch (e) {}
   if (window.__bossToudiChat && oldContextAlive) return;
@@ -155,7 +160,7 @@
     return { success: true, imageOk: imgOk };
   }
 
-  if (runtime && runtime.onMessage && typeof runtime.onMessage.addListener === 'function') runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  try { messageChannel.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SEND') {
       doSend(msg).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
@@ -164,5 +169,5 @@
       sendActive(msg.image, msg.greeting).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
-  });
+  }); } catch (e) {}
 })();
