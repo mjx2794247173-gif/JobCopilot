@@ -366,8 +366,9 @@
       return true;
     }
     if (msg.type === 'GO_CHAT' || msg.type === 'INITIATE' || msg.type === 'CREATE_CONV') {
-      goChat(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
-      return true;
+      // 遗留消息入口：当前投递已由 background 在页面主环境点击，不能再从隔离脚本触发 javascript: 链接。
+      sendResponse({ success: false, error: '旧沟通入口已停用，请使用当前投递流程' });
+      return;
     }
   }); } catch (e) {}
 })();
