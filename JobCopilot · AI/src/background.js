@@ -314,8 +314,9 @@ function isBossJobDetailLink(link) {
 async function ensureTab(url) {
   let tabs = await chrome.tabs.query({ url: '*://*.zhipin.com/*' });
   let tab = tabs[0];
-  if (!tab) tab = await chrome.tabs.create({ url: url });
-  else await chrome.tabs.update(tab.id, { url: url });
+  // 真实鼠标事件仅对前台标签可靠；投递详情页必须激活后再点击“立即沟通”。
+  if (!tab) tab = await chrome.tabs.create({ url: url, active: true });
+  else tab = await chrome.tabs.update(tab.id, { url: url, active: true });
   await waitTabComplete(tab.id);
   await sleep(2000);
   return tab;
