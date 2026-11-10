@@ -121,23 +121,6 @@ function sendToTab(tabId, msg, timeoutMs) {
     });
   });
 }
-async function readJobDetailWithRecovery(tabId, job, selectedInPage, directDetail) {
-  let last;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    last = await sendToTab(tabId, {
-      type: 'OPEN_JD', job: job, selectedInPage: selectedInPage, directDetail: directDetail
-    }, 15000);
-    const error = (last && last.error) || '';
-    if (!/back\/forward cache|message channel is closed|Receiving end does not exist/i.test(error)) return last;
-    if (attempt === 0) {
-      log('  页面缓存恢复中，重新读取JD...');
-      await sleep(800);
-      await ensureInjected(tabId, 'src/content-search.js');
-      await sleep(500);
-    }
-  }
-  return last;
-}
 // BOSS 对脚本 element.click() 产生的非可信事件会忽略。先在页面主环境定位按钮，
 // 再用 DevTools Input.dispatchMouseEvent 发出浏览器级鼠标事件，保留真实用户点击语义。
 async function findBossActionPoint(tabId, text) {
@@ -346,6 +329,22 @@ async function waitForUrlPart(tabId, part, timeoutMs) {
   }
   return false;
 }
+function sameTargetUrl(currentUrl, targetUrl) {
+  try {
+    const current = new URL(currentUrl);
+    const target = new URL(targetUrl);
+    return current.origin === target.origin && current.pathname === target.pathname && current.search === target.search;
+  } catch (e) { return false; }
+}
+async function waitForTargetTabReady(tabId, targetUrl, timeoutMs) {
+  const end = Date.now() + (timeoutMs || 20000);
+  while (Date.now() < end) {
+    const tab = await new Promise((resolve) => chrome.tabs.get(tabId, (value) => resolve(chrome.runtime.lastError ? null : value)));
+    if (tab && tab.status === 'complete' && sameTargetUrl(tab.url || '', targetUrl)) return true;
+    await sleep(250);
+  }
+  return false;
+}
 async function waitForChatDestination(originalTabId, knownChatTabIds, timeoutMs) {
   const end = Date.now() + (timeoutMs || 15000);
   const known = new Set(knownChatTabIds || []);
@@ -382,7 +381,9 @@ async function ensureTab(url) {
   // 真实鼠标事件仅对前台标签可靠；投递详情页必须激活后再点击“立即沟通”。
   if (!tab) tab = await chrome.tabs.create({ url: url, active: true });
   else tab = await chrome.tabs.update(tab.id, { url: url, active: true });
-  await waitTabComplete(tab.id);
+  // 不可仅检查 complete：复用标签时旧页也可能仍是 complete，导致消息误发给即将进入 BFCache 的旧文档。
+  const arrived = await waitForTargetTabReady(tab.id, url, 20000);
+  if (!arrived) throw new Error('目标岗位详情页打开超时');
   await sleep(2000);
   return tab;
 }
@@ -554,7 +555,7 @@ async function runDeliver(jobIds) {
       log('  已打开目标岗位详情页...');
     }
     log('  读取岗位JD...');
-    const jdr = await readJobDetailWithRecovery(tab.id, job, !directDetail, directDetail);
+    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job, selectedInPage: !directDetail, directDetail: directDetail }, 15000);
     const jd = (jdr && jdr.jd) || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
@@ -601,7 +602,17 @@ function finishDeliver() {
 // ── 消息入口 ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'START_COLLECT') { runCollect(); sendResponse({ ok: true }); return; }
-  if (msg.type === 'START_DELIVER') { runDeliver(msg.jobIds); sendResponse({ ok: true }); return; }
+  if (msg.type === 'START_DELIVER') {
+    // 避免重复点击“投递选中”或侧栏重连时同时跑多个投递循环、争抢同一个 BOSS 标签页。
+    if (state.phase === 'delivering') {
+      log('投递正在运行，已忽略重复启动请求', 'warn');
+      sendResponse({ ok: true, alreadyRunning: true });
+      return;
+    }
+    runDeliver(msg.jobIds);
+    sendResponse({ ok: true });
+    return;
+  }
   if (msg.type === 'PAUSE') { state.paused = true; log('已暂停', 'warn'); sendResponse({ ok: true }); return; }
   if (msg.type === 'RESUME') { state.paused = false; log('继续', 'info'); sendResponse({ ok: true }); return; }
   if (msg.type === 'STOP') { state.aborted = true; state.paused = false; log('已停止', 'warn'); state.phase = 'idle'; pushPhase(); sendResponse({ ok: true }); return; }
