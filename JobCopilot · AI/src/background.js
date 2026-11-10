@@ -253,6 +253,12 @@ function buildSearchUrl(cfg) {
   // 行业/规模：BOSS 代码不确定，暂不加入（错误代码会导致搜不到任何岗位）
   return 'https://www.zhipin.com/web/geek/jobs?' + params.toString();
 }
+function isBossJobDetailLink(link) {
+  try {
+    const url = new URL(link);
+    return /(^|\.)zhipin\.com$/i.test(url.hostname) && /\/job_detail\//.test(url.pathname);
+  } catch (e) { return false; }
+}
 async function ensureTab(url) {
   let tabs = await chrome.tabs.query({ url: '*://*.zhipin.com/*' });
   let tab = tabs[0];
@@ -414,18 +420,23 @@ async function runDeliver(jobIds) {
     if (!job) { log('[' + (k + 1) + '/' + ids.length + '] 找不到岗位数据，跳过', 'warn'); continue; }
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
-    // 1. 原版路径：回搜索页，在当前列表定位目标岗位卡片，再读取完整 JD。
-    const tab = await ensureTab(searchUrl);
+    // 1. 优先直接打开收集时保存的目标详情页，避免新搜索页的置顶推荐卡干扰。
+    const directDetail = isBossJobDetailLink(job.link);
+    const tab = await ensureTab(directDetail ? job.link : searchUrl);
     await ensureInjected(tab.id, 'src/content-search.js');
-    const selected = await selectBossJobCardInPage(tab.id, job);
-    if (!selected.success) {
-      recordFail(job, selected.error || '未定位目标岗位');
-      log('  定位目标岗位失败：' + (selected.error || '未知错误'), 'error');
-      progress(k + 1, ids.length, '投递');
-      continue;
+    if (!directDetail) {
+      const selected = await selectBossJobCardInPage(tab.id, job);
+      if (!selected.success) {
+        recordFail(job, selected.error || '未定位目标岗位');
+        log('  定位目标岗位失败：' + (selected.error || '未知错误'), 'error');
+        progress(k + 1, ids.length, '投递');
+        continue;
+      }
+    } else {
+      log('  已打开目标岗位详情页...');
     }
     log('  读取岗位JD...');
-    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job, selectedInPage: true });
+    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job, selectedInPage: !directDetail, directDetail: directDetail });
     const jd = (jdr && jdr.jd) || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语

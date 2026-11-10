@@ -310,8 +310,8 @@
   }
 
   // 点开卡片 → 抓取右侧详情面板的完整JD
-  async function openJD(job, selectedInPage) {
-    if (!selectedInPage) {
+  async function openJD(job, selectedInPage, directDetail) {
+    if (!selectedInPage && !directDetail) {
       const card = findCardByJob(job);
       if (!card) return { success: false, error: '未找到岗位卡片' };
       card.scrollIntoView({ block: 'center' });
@@ -372,7 +372,7 @@
       return true;
     }
     if (msg.type === 'OPEN_JD') {
-      openJD(msg.job, !!msg.selectedInPage).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
+      openJD(msg.job, !!msg.selectedInPage, !!msg.directDetail).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
     if (msg.type === 'GO_CHAT' || msg.type === 'INITIATE' || msg.type === 'CREATE_CONV') {
