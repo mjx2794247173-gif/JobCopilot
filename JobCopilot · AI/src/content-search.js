@@ -260,6 +260,16 @@
     });
   }
 
+  // BOSS 部分沟通入口使用 javascript: 链接。内容脚本触发 click 时，浏览器会拦截其默认跳转；
+  // 仅阻止该默认跳转，保留 BOSS 原有的点击事件来打开沟通弹窗/聊天页。
+  function clickBossAction(el) {
+    const href = (el && el.getAttribute && el.getAttribute('href')) || '';
+    if (/^\s*javascript:/i.test(href)) {
+      el.addEventListener('click', (event) => event.preventDefault(), { capture: true, once: true });
+    }
+    el.click();
+  }
+
   function findChatButton() {
     const elements = document.querySelectorAll('a, button, [role="button"], div, span');
     for (const el of elements) {
@@ -320,10 +330,10 @@
       if (card) { card.click(); await sleep(1200); btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 4000); }
     }
     if (!btn) return { success: false, error: '未找到立即沟通按钮' };
-    btn.click();
+    clickBossAction(btn);
     await sleep(1500);
     const go = await waitForText(['继续沟通'], 4000);
-    if (go) { go.click(); return { success: true, navigated: true }; }
+    if (go) { clickBossAction(go); return { success: true, navigated: true }; }
     return { success: true, navigated: false };
   }
 
