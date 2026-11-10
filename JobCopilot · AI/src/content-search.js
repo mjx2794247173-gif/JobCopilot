@@ -226,6 +226,8 @@
   function findCardByJob(job) {
     const cards = getCards();
     for (const c of cards) { const j = parseCard(c); if (job.id && j.id === job.id) return c; }
+    // 有唯一 ID 时绝不能按名称兜底：置顶的系统推荐岗位可能名称相近，却会被误点。
+    if (job.id) return null;
     for (const c of cards) { const j = parseCard(c); if (j.name === job.name && (!job.company || j.company === job.company)) return c; }
     return null;
   }
@@ -306,16 +308,16 @@
 
   // 卡片已打开 → 点立即沟通 → 弹窗点"继续沟通"（跳转聊天页）
   async function goChat(job) {
-    let btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 5000);
-    if (!btn) {
-      const all = document.querySelectorAll('a, button, span');
-      for (const el of all) { const tx = (el.textContent || '').trim(); if (tx === '立即沟通' || tx === '继续沟通') { btn = el; break; } }
-    }
-    if (!btn) { // 面板可能关了，重新点卡片
-      const card = findCardByJob(job);
-      if (card) { card.click(); await sleep(1200); btn = await waitFor(SELECTORS.jobs.immediateChatBtn, 4000); }
-    }
-    if (!btn) return { success: false, error: '未找到立即沟通按钮' };
+    // 每次建立联系前都重新选中目标卡。找不到时安全跳过，不能拿页面置顶卡替代。
+    const card = findCardByJob(job);
+    if (!card) return { success: false, error: '未找到目标岗位卡片，已跳过以避免误投置顶推荐岗位' };
+    card.scrollIntoView({ block: 'center' });
+    card.click();
+    await sleep(1200);
+
+    // 只接受即时聊天入口；"立即网申"会跳转外部信息表，明确不自动处理。
+    const btn = await waitForChatButton(5000);
+    if (!btn) return { success: false, error: '目标岗位不是即时沟通岗位（可能为立即网申），已跳过' };
     btn.click();
     await sleep(1500);
     const go = await waitForText(['继续沟通'], 4000);
