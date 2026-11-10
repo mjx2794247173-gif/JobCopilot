@@ -121,6 +121,23 @@ function sendToTab(tabId, msg, timeoutMs) {
     });
   });
 }
+async function readJobDetailWithRecovery(tabId, job, selectedInPage, directDetail) {
+  let last;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    last = await sendToTab(tabId, {
+      type: 'OPEN_JD', job: job, selectedInPage: selectedInPage, directDetail: directDetail
+    }, 15000);
+    const error = (last && last.error) || '';
+    if (!/back\/forward cache|message channel is closed|Receiving end does not exist/i.test(error)) return last;
+    if (attempt === 0) {
+      log('  页面缓存恢复中，重新读取JD...');
+      await sleep(800);
+      await ensureInjected(tabId, 'src/content-search.js');
+      await sleep(500);
+    }
+  }
+  return last;
+}
 // BOSS 对脚本 element.click() 产生的非可信事件会忽略。先在页面主环境定位按钮，
 // 再用 DevTools Input.dispatchMouseEvent 发出浏览器级鼠标事件，保留真实用户点击语义。
 async function findBossActionPoint(tabId, text) {
@@ -537,7 +554,7 @@ async function runDeliver(jobIds) {
       log('  已打开目标岗位详情页...');
     }
     log('  读取岗位JD...');
-    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job, selectedInPage: !directDetail, directDetail: directDetail });
+    const jdr = await readJobDetailWithRecovery(tab.id, job, !directDetail, directDetail);
     const jd = (jdr && jdr.jd) || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
