@@ -243,18 +243,21 @@ async function startBossChatInPage(tabId) {
   if (await isOnlineApplicationPage(tabId)) {
     return { success: false, error: '网申岗位，不自动投递' };
   }
+  // BOSS 有时会在新标签中打开聊天页。记录点击前已有的会话标签，后续只接受新开的会话。
+  const knownChatTabIds = (await chrome.tabs.query({ url: '*://*.zhipin.com/web/geek/chat*' })).map((tab) => tab.id);
   const first = await clickBossActionInPage(tabId, '立即沟通');
   if (!first.success) return first;
-  // 与原版一致：给 BOSS 弹窗最多 4 秒渲染时间，而不是只检查一次。
-  const deadline = Date.now() + 4000;
-  let lastResult = { success: false, error: '未找到继续沟通按钮' };
+  // 只有实际进入聊天页才算成功；“继续沟通”按钮被点击不代表跳转已完成。
+  const deadline = Date.now() + 7000;
   while (Date.now() < deadline) {
-    if ((await curUrl(tabId)).indexOf('/web/geek/chat') >= 0) return { success: true };
-    lastResult = await clickBossActionInPage(tabId, '继续沟通');
-    if (lastResult.success) return { success: true };
+    if ((await curUrl(tabId)).indexOf('/web/geek/chat') >= 0) return { success: true, tabId: tabId };
+    const destination = await waitForChatDestination(tabId, knownChatTabIds, 1);
+    if (destination) return { success: true, tabId: destination.id };
+    // 某些岗位会先弹出确认层；没有该按钮并非失败，继续等待实际聊天页。
+    await clickBossActionInPage(tabId, '继续沟通');
     await sleep(250);
   }
-  return lastResult;
+  return { success: false, error: '点击立即沟通后未打开聊天页' };
 }
 function waitTabComplete(tabId, timeoutMs) {
   return new Promise((resolve) => {
@@ -503,14 +506,15 @@ async function runDeliver(jobIds) {
       progress(k + 1, ids.length, '投递');
       continue;
     }
-    await waitTabComplete(tab.id); await sleep(2500);
+    const chatTabId = chatStart.tabId || tab.id;
+    await waitTabComplete(chatTabId); await sleep(2500);
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
-    const u = await curUrl(tab.id);
+    const u = await curUrl(chatTabId);
     if (u.indexOf('/web/geek/chat') < 0) { recordFail(job, '未跳转聊天页'); log('  未进入聊天页，跳过', 'error'); progress(k + 1, ids.length, '投递'); continue; }
-    await ensureInjected(tab.id, 'src/content-chat.js');
+    await ensureInjected(chatTabId, 'src/content-chat.js');
     log('  发简历图片 + 招呼语...');
-    const r = await sendToTab(tab.id, { type: 'SEND_ACTIVE', image: cfg.resumeImage || '', greeting: greeting });
+    const r = await sendToTab(chatTabId, { type: 'SEND_ACTIVE', image: cfg.resumeImage || '', greeting: greeting });
     if (r && r.success) { recordOk(job); state.processed[job.id] = 1; await chrome.storage.local.set({ processed: state.processed }); log('  ✓ 投递成功', 'success'); }
     else { recordFail(job, (r && r.error) || '发送失败'); log('  失败：' + (r && r.error), 'error'); }
     progress(k + 1, ids.length, '投递');
