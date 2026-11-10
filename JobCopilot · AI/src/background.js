@@ -121,6 +121,39 @@ function sendToTab(tabId, msg, timeoutMs) {
     });
   });
 }
+// BOSS 的沟通入口由页面主环境处理。不要从 content script 的隔离环境触发 javascript: 链接，
+// 否则 Edge CSP 会拦截默认导航；这里仅把原有的两次点击放回页面主环境执行。
+async function clickBossActionInPage(tabId, text) {
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      world: 'MAIN',
+      args: [text],
+      func: (expectedText) => {
+        const elements = Array.from(document.querySelectorAll('a, button, [role="button"], div, span'));
+        const node = elements.find((el) => {
+          const value = (el.textContent || '').replace(/\s+/g, '').trim();
+          return value === expectedText && el.offsetParent !== null;
+        });
+        if (!node) return { success: false, error: '未找到' + expectedText + '按钮' };
+        const button = node.closest('a, button, [role="button"], [class*="btn"], [class*="button"]') || node;
+        button.click();
+        return { success: true };
+      }
+    });
+    return (injected[0] && injected[0].result) || { success: false, error: '页面点击未返回结果' };
+  } catch (e) {
+    return { success: false, error: '页面点击失败：' + e.message };
+  }
+}
+async function startBossChatInPage(tabId) {
+  const first = await clickBossActionInPage(tabId, '立即沟通');
+  if (!first.success) return first;
+  await sleep(1500);
+  if ((await curUrl(tabId)).indexOf('/web/geek/chat') >= 0) return { success: true };
+  const second = await clickBossActionInPage(tabId, '继续沟通');
+  return second.success ? { success: true } : second;
+}
 function waitTabComplete(tabId, timeoutMs) {
   return new Promise((resolve) => {
     let settled = false;
@@ -351,7 +384,13 @@ async function runDeliver(jobIds) {
 
     // 3. 点立即沟通 → 继续沟通（跳聊天页）
     log('  建立联系（立即沟通 → 继续沟通）...');
-    await sendToTab(tab.id, { type: 'GO_CHAT', job: job });
+    const chatStart = await startBossChatInPage(tab.id);
+    if (!chatStart.success) {
+      recordFail(job, chatStart.error || '建立联系失败');
+      log('  建立联系失败：' + (chatStart.error || '未知错误'), 'error');
+      progress(k + 1, ids.length, '投递');
+      continue;
+    }
     await waitTabComplete(tab.id); await sleep(2500);
 
     // 4. 聊天页当前打开的即该岗位会话，先发图片再发招呼语（无需匹配）
