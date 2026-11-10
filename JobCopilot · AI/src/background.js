@@ -150,7 +150,50 @@ async function clickBossActionInPage(tabId, text) {
     return { success: false, error: '页面点击失败：' + e.message };
   }
 }
+async function isOnlineApplicationPage(tabId) {
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      world: 'MAIN',
+      func: () => Array.from(document.querySelectorAll('a, button, [role="button"]')).some((el) => {
+        return el.offsetParent !== null && (el.textContent || '').replace(/\s+/g, '').trim() === '立即网申';
+      })
+    });
+    return !!(injected[0] && injected[0].result);
+  } catch (e) { return false; }
+}
+async function selectBossJobCardInPage(tabId, job) {
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      world: 'MAIN',
+      args: [{ id: job.id || '', name: job.name || '', company: job.company || '' }],
+      func: (target) => {
+        const cards = Array.from(document.querySelectorAll('li.job-card-box'));
+        const card = cards.find((item) => {
+          const link = item.querySelector('a[href*="/job_detail/"]');
+          const href = (link && (link.getAttribute('href') || link.href)) || '';
+          if (target.id && href.includes(target.id)) return true;
+          if (target.id) return false;
+          const name = (item.querySelector('.job-name') || {}).textContent || '';
+          const company = (item.querySelector('.company-name') || {}).textContent || '';
+          return name.trim() === target.name && (!target.company || company.trim() === target.company);
+        });
+        if (!card) return { success: false, error: '页面中未找到目标岗位卡片' };
+        card.scrollIntoView({ block: 'center' });
+        card.click();
+        return { success: true };
+      }
+    });
+    return (injected[0] && injected[0].result) || { success: false, error: '岗位选择未返回结果' };
+  } catch (e) {
+    return { success: false, error: '岗位选择失败：' + e.message };
+  }
+}
 async function startBossChatInPage(tabId) {
+  if (await isOnlineApplicationPage(tabId)) {
+    return { success: false, error: '网申岗位，不自动投递' };
+  }
   const first = await clickBossActionInPage(tabId, '立即沟通');
   if (!first.success) return first;
   // 与原版一致：给 BOSS 弹窗最多 4 秒渲染时间，而不是只检查一次。
@@ -374,8 +417,15 @@ async function runDeliver(jobIds) {
     // 1. 原版路径：回搜索页，在当前列表定位目标岗位卡片，再读取完整 JD。
     const tab = await ensureTab(searchUrl);
     await ensureInjected(tab.id, 'src/content-search.js');
+    const selected = await selectBossJobCardInPage(tab.id, job);
+    if (!selected.success) {
+      recordFail(job, selected.error || '未定位目标岗位');
+      log('  定位目标岗位失败：' + (selected.error || '未知错误'), 'error');
+      progress(k + 1, ids.length, '投递');
+      continue;
+    }
     log('  读取岗位JD...');
-    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
+    const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job, selectedInPage: true });
     const jd = (jdr && jdr.jd) || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语

@@ -310,12 +310,14 @@
   }
 
   // 点开卡片 → 抓取右侧详情面板的完整JD
-  async function openJD(job) {
-    const card = findCardByJob(job);
-    if (!card) return { success: false, error: '未找到岗位卡片' };
-    card.scrollIntoView({ block: 'center' });
-    await sleep(400);
-    card.click();
+  async function openJD(job, selectedInPage) {
+    if (!selectedInPage) {
+      const card = findCardByJob(job);
+      if (!card) return { success: false, error: '未找到岗位卡片' };
+      card.scrollIntoView({ block: 'center' });
+      await sleep(400);
+      card.click();
+    }
     await sleep(1600);
     let jd = '';
     const det = document.querySelector('.job-detail-box, [class*="job-detail"], .detail-content, .job-detail');
@@ -370,7 +372,7 @@
       return true;
     }
     if (msg.type === 'OPEN_JD') {
-      openJD(msg.job).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
+      openJD(msg.job, !!msg.selectedInPage).then(r => sendResponse(r)).catch(e => sendResponse({ success: false, error: e.message }));
       return true;
     }
     if (msg.type === 'GO_CHAT' || msg.type === 'INITIATE' || msg.type === 'CREATE_CONV') {
