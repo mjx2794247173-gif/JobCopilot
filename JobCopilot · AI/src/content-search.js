@@ -137,6 +137,12 @@
     return /万/.test(s) ? value * 10 : value;
   }
 
+  // BOSS 置顶的国央企系统推荐会跳转到信息补全网申表，不属于可自动沟通岗位。
+  function isOnlineApplicationCard(card) {
+    const text = (card && (card.innerText || card.textContent) || '').replace(/\s+/g, '');
+    return /国央企|立即网申/.test(text);
+  }
+
   async function captureJD(card) {
     card.scrollIntoView({ block: 'center' });
     card.click();
@@ -153,6 +159,7 @@
   function addCards(cards, baseUrl, minSalary, seen, jobs, count) {
     let added = 0;
     for (const card of cards) {
+      if (isOnlineApplicationCard(card)) continue;
       const job = parseCard(card, baseUrl);
       const floor = salaryFloorK(job.salary);
       const salaryOk = !minSalary || floor === null || floor >= minSalary;
@@ -212,6 +219,7 @@
     const jobs = [];
     const seen = {};
     for (const card of getCards()) {
+      if (isOnlineApplicationCard(card)) continue;
       const job = parseCard(card);
       const floor = salaryFloorK(job.salary);
       const salaryOk = !minSalary || floor === null || floor >= minSalary;
