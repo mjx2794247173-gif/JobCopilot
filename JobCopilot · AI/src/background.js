@@ -143,7 +143,18 @@ async function findBossActionPoint(tabId, text) {
         }) || controls.find((el) => {
           const value = normalize(el.textContent);
           return value.includes(expectedText) && el.offsetParent !== null;
-        });
+        }) || (expectedText === '继续沟通' ? Array.from(document.querySelectorAll('a, button, [role="button"], div, span'))
+          .filter((el) => normalize(el.textContent) === expectedText && el.offsetParent !== null)
+          .map((el) => el.closest('a, button, [role="button"], [class*="btn"], [class*="button"]') || el)
+          .filter((el) => {
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          })
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return ar.width * ar.height - br.width * br.height;
+          })[0] : null);
         if (!node) return { success: false, error: '未找到' + expectedText + '按钮' };
         const button = direct || node;
         button.scrollIntoView({ block: 'center', inline: 'center' });
@@ -193,10 +204,10 @@ async function clickBossActionInPage(tabId, text) {
       type: 'mouseMoved', x: point.x, y: point.y, button: 'none', clickCount: 0
     });
     await debuggerCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1
+      type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1, pointerType: 'mouse'
     });
     await debuggerCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1
+      type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1, pointerType: 'mouse'
     });
     return { success: true };
   } catch (e) {
