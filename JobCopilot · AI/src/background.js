@@ -131,12 +131,16 @@ async function clickBossActionInPage(tabId, text) {
       args: [text],
       func: (expectedText) => {
         const elements = Array.from(document.querySelectorAll('a, button, [role="button"], div, span'));
-        const node = elements.find((el) => {
+        // 原版 BOSS 入口的稳定选择器优先；不同页面中按钮文字可能不完整或嵌套。
+        const direct = expectedText === '立即沟通'
+          ? Array.from(document.querySelectorAll('a.op-btn-chat')).find((el) => el.offsetParent !== null)
+          : null;
+        const node = direct || elements.find((el) => {
           const value = (el.textContent || '').replace(/\s+/g, '').trim();
           return value === expectedText && el.offsetParent !== null;
         });
         if (!node) return { success: false, error: '未找到' + expectedText + '按钮' };
-        const button = node.closest('a, button, [role="button"], [class*="btn"], [class*="button"]') || node;
+        const button = direct || node.closest('a, button, [role="button"], [class*="btn"], [class*="button"]') || node;
         button.click();
         return { success: true };
       }
