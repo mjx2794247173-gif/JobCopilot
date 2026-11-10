@@ -121,9 +121,9 @@ function sendToTab(tabId, msg, timeoutMs) {
     });
   });
 }
-// BOSS 的沟通入口由页面主环境处理。不要从 content script 的隔离环境触发 javascript: 链接，
-// 否则 Edge CSP 会拦截默认导航；这里仅把原有的两次点击放回页面主环境执行。
-async function clickBossActionInPage(tabId, text) {
+// BOSS 对脚本 element.click() 产生的非可信事件会忽略。先在页面主环境定位按钮，
+// 再用 DevTools Input.dispatchMouseEvent 发出浏览器级鼠标事件，保留真实用户点击语义。
+async function findBossActionPoint(tabId, text) {
   try {
     const injected = await chrome.scripting.executeScript({
       target: { tabId: tabId },
@@ -141,13 +141,62 @@ async function clickBossActionInPage(tabId, text) {
         });
         if (!node) return { success: false, error: '未找到' + expectedText + '按钮' };
         const button = direct || node.closest('a, button, [role="button"], [class*="btn"], [class*="button"]') || node;
-        button.click();
-        return { success: true };
+        button.scrollIntoView({ block: 'center', inline: 'center' });
+        const rect = button.getBoundingClientRect();
+        if (!rect.width || !rect.height) return { success: false, error: expectedText + '按钮不可点击' };
+        return {
+          success: true,
+          x: Math.round(rect.left + rect.width / 2),
+          y: Math.round(rect.top + rect.height / 2)
+        };
       }
     });
-    return (injected[0] && injected[0].result) || { success: false, error: '页面点击未返回结果' };
+    return (injected[0] && injected[0].result) || { success: false, error: '页面定位未返回结果' };
   } catch (e) {
-    return { success: false, error: '页面点击失败：' + e.message };
+    return { success: false, error: '页面定位失败：' + e.message };
+  }
+}
+function debuggerCommand(target, method, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand(target, method, params || {}, (result) => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(result);
+    });
+  });
+}
+function attachDebugger(target) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach(target, '1.3', () => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve();
+    });
+  });
+}
+function detachDebugger(target) {
+  return new Promise((resolve) => chrome.debugger.detach(target, () => resolve()));
+}
+async function clickBossActionInPage(tabId, text) {
+  const point = await findBossActionPoint(tabId, text);
+  if (!point.success) return point;
+  const target = { tabId: tabId };
+  let attached = false;
+  try {
+    await attachDebugger(target);
+    attached = true;
+    await debuggerCommand(target, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: point.x, y: point.y, button: 'none', clickCount: 0
+    });
+    await debuggerCommand(target, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1
+    });
+    await debuggerCommand(target, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: '真实点击失败：' + e.message };
+  } finally {
+    if (attached) await detachDebugger(target);
   }
 }
 async function isOnlineApplicationPage(tabId) {
