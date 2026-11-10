@@ -167,6 +167,13 @@ function buildSearchUrl(cfg) {
   // 行业/规模：BOSS 代码不确定，暂不加入（错误代码会导致搜不到任何岗位）
   return 'https://www.zhipin.com/web/geek/jobs?' + params.toString();
 }
+function searchUrlForJob(searchUrl, job) {
+  const page = Number(job && job.sourcePage);
+  if (!Number.isInteger(page) || page <= 1) return searchUrl;
+  const url = new URL(searchUrl);
+  url.searchParams.set('page', String(page));
+  return url.href;
+}
 async function ensureTab(url) {
   let tabs = await chrome.tabs.query({ url: '*://*.zhipin.com/*' });
   let tab = tabs[0];
@@ -329,7 +336,8 @@ async function runDeliver(jobIds) {
     log('[' + (k + 1) + '/' + ids.length + '] ' + job.name + ' - ' + (job.company || ''));
 
     // 1. 原版路径：回搜索页，点开岗位卡片读取完整 JD。
-    const tab = await ensureTab(searchUrl);
+    // 岗位可能来自第 2 页及以后；先回到它实际被收集到的页面，避免点到第一页置顶推荐卡。
+    const tab = await ensureTab(searchUrlForJob(searchUrl, job));
     await ensureInjected(tab.id, 'src/content-search.js');
     log('  读取岗位JD...');
     const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });

@@ -108,6 +108,8 @@
     const rawLink = linkEl ? (linkEl.getAttribute('href') || linkEl.href || '') : '';
     let link = '';
     try { link = rawLink ? new URL(rawLink, baseUrl || location.origin).href : ''; } catch (e) { link = rawLink; }
+    let sourcePage = 1;
+    try { sourcePage = Number(new URL(baseUrl || location.href, location.origin).searchParams.get('page')) || 1; } catch (e) {}
     const m = link.match(/job_detail\/([^.?]+)\.html/);
     const companyEl = card.querySelector('.company-name a, .company-name, [class*="company-name"], .boss-info .company-name, .company-info a, [class*="company"] a');
     const companyText = companyEl ? companyEl.textContent.trim() : '';
@@ -123,7 +125,9 @@
       salary: salEl ? salEl.textContent.trim() : '',
       tags: tags,
       company: company,
-      link: link
+      link: link,
+      // 仅记录采集来源页，投递仍使用原来的搜索页→岗位卡→聊天页流程。
+      sourcePage: sourcePage
     };
   }
 
