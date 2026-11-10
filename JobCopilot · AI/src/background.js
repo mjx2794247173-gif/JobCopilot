@@ -216,6 +216,37 @@ async function clickBossActionInPage(tabId, text) {
     if (attached) await detachDebugger(target);
   }
 }
+// 第二步是 BOSS 自己的确认弹窗，不会触发 javascript: 导航；沿用原版直接调用按钮处理。
+async function confirmBossChatInPage(tabId) {
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      world: 'MAIN',
+      func: () => {
+        const normalize = (value) => (value || '').replace(/\s+/g, '').trim();
+        const nodes = Array.from(document.querySelectorAll('button, a, [role="button"], div, span'))
+          .filter((el) => normalize(el.textContent) === '继续沟通' && el.offsetParent !== null)
+          .map((el) => el.closest('button, a, [role="button"], [class*="btn"], [class*="button"]') || el)
+          .filter((el) => {
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          })
+          .sort((a, b) => {
+            const ar = a.getBoundingClientRect();
+            const br = b.getBoundingClientRect();
+            return ar.width * ar.height - br.width * br.height;
+          });
+        const button = nodes[0];
+        if (!button) return { success: false, error: '未找到继续沟通按钮' };
+        button.click();
+        return { success: true };
+      }
+    });
+    return (injected[0] && injected[0].result) || { success: false, error: '继续沟通点击未返回结果' };
+  } catch (e) {
+    return { success: false, error: '继续沟通点击失败：' + e.message };
+  }
+}
 async function isOnlineApplicationPage(tabId) {
   try {
     const injected = await chrome.scripting.executeScript({
@@ -270,8 +301,8 @@ async function startBossChatInPage(tabId) {
     if ((await curUrl(tabId)).indexOf('/web/geek/chat') >= 0) return { success: true, tabId: tabId };
     const destination = await waitForChatDestination(tabId, knownChatTabIds, 1);
     if (destination) return { success: true, tabId: destination.id };
-    // 某些岗位会先弹出确认层；没有该按钮并非失败，继续等待实际聊天页。
-    await clickBossActionInPage(tabId, '继续沟通');
+    // 原版逻辑：弹出确认层后直接点击“继续沟通”。
+    await confirmBossChatInPage(tabId);
     await sleep(250);
   }
   return { success: false, error: '点击立即沟通后未打开聊天页' };
