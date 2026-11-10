@@ -333,13 +333,6 @@ async function runDeliver(jobIds) {
     await ensureInjected(tab.id, 'src/content-search.js');
     log('  读取岗位JD...');
     const jdr = await sendToTab(tab.id, { type: 'OPEN_JD', job: job });
-    if (!jdr || !jdr.success) {
-      const reason = (jdr && jdr.error) || '页面未响应';
-      recordFail(job, '读取目标岗位失败：' + reason);
-      log('  读取目标岗位失败：' + reason, 'warn');
-      progress(k + 1, ids.length, '投递');
-      continue;
-    }
     const jd = (jdr && jdr.jd) || '';
 
     // 2. 用【完整JD + 简历】现场生成这个岗位专属的招呼语
