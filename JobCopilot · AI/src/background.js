@@ -153,10 +153,16 @@ async function clickBossActionInPage(tabId, text) {
 async function startBossChatInPage(tabId) {
   const first = await clickBossActionInPage(tabId, '立即沟通');
   if (!first.success) return first;
-  await sleep(1500);
-  if ((await curUrl(tabId)).indexOf('/web/geek/chat') >= 0) return { success: true };
-  const second = await clickBossActionInPage(tabId, '继续沟通');
-  return second.success ? { success: true } : second;
+  // 与原版一致：给 BOSS 弹窗最多 4 秒渲染时间，而不是只检查一次。
+  const deadline = Date.now() + 4000;
+  let lastResult = { success: false, error: '未找到继续沟通按钮' };
+  while (Date.now() < deadline) {
+    if ((await curUrl(tabId)).indexOf('/web/geek/chat') >= 0) return { success: true };
+    lastResult = await clickBossActionInPage(tabId, '继续沟通');
+    if (lastResult.success) return { success: true };
+    await sleep(250);
+  }
+  return lastResult;
 }
 function waitTabComplete(tabId, timeoutMs) {
   return new Promise((resolve) => {
