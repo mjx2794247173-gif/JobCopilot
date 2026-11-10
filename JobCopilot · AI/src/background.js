@@ -129,19 +129,25 @@ async function findBossActionPoint(tabId, text) {
       target: { tabId: tabId },
       world: 'MAIN',
       args: [text],
-      func: (expectedText) => {
-        const elements = Array.from(document.querySelectorAll('a, button, [role="button"], div, span'));
+      func: async (expectedText) => {
+        const normalize = (value) => (value || '').replace(/\s+/g, '').trim();
+        // 只取实际可点击控件。此前 div/span 外层容器也参与匹配，会导致坐标落在弹窗空白处。
+        const controls = Array.from(document.querySelectorAll('button, a, [role="button"], [class*="btn"], [class*="button"]'));
         // 原版 BOSS 入口的稳定选择器优先；不同页面中按钮文字可能不完整或嵌套。
-        const direct = expectedText === '立即沟通'
-          ? Array.from(document.querySelectorAll('a.op-btn-chat')).find((el) => el.offsetParent !== null)
-          : null;
-        const node = direct || elements.find((el) => {
-          const value = (el.textContent || '').replace(/\s+/g, '').trim();
+        const direct = Array.from(document.querySelectorAll('a.op-btn-chat, button.op-btn-chat')).find((el) => {
+          return el.offsetParent !== null && normalize(el.textContent).includes(expectedText);
+        });
+        const node = direct || controls.find((el) => {
+          const value = normalize(el.textContent);
           return value === expectedText && el.offsetParent !== null;
+        }) || controls.find((el) => {
+          const value = normalize(el.textContent);
+          return value.includes(expectedText) && el.offsetParent !== null;
         });
         if (!node) return { success: false, error: '未找到' + expectedText + '按钮' };
-        const button = direct || node.closest('a, button, [role="button"], [class*="btn"], [class*="button"]') || node;
+        const button = direct || node;
         button.scrollIntoView({ block: 'center', inline: 'center' });
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const rect = button.getBoundingClientRect();
         if (!rect.width || !rect.height) return { success: false, error: expectedText + '按钮不可点击' };
         return {
