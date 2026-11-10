@@ -263,11 +263,16 @@
   // BOSS 部分沟通入口使用 javascript: 链接。内容脚本触发 click 时，浏览器会拦截其默认跳转；
   // 仅阻止该默认跳转，保留 BOSS 原有的点击事件来打开沟通弹窗/聊天页。
   function clickBossAction(el) {
-    const href = (el && el.getAttribute && el.getAttribute('href')) || '';
-    if (/^\s*javascript:/i.test(href)) {
-      el.addEventListener('click', (event) => event.preventDefault(), { capture: true, once: true });
-    }
-    el.click();
+    // 文字 span/div 常在 javascript: 链接内部，需处理最近的父级 a，而非只看传入节点。
+    const anchor = el && el.closest ? el.closest('a[href]') : null;
+    const link = anchor || el;
+    const href = (link && link.getAttribute && link.getAttribute('href')) || '';
+    if (!/^\s*javascript:/i.test(href)) { el.click(); return; }
+
+    // 移除默认 javascript: 导航，但不阻止事件冒泡，BOSS 自己的点击处理仍会照常执行。
+    link.removeAttribute('href');
+    try { el.click(); }
+    finally { link.setAttribute('href', href); }
   }
 
   function findChatButton() {
