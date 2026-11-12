@@ -193,27 +193,27 @@ function detachDebugger(target) {
   return new Promise((resolve) => chrome.debugger.detach(target, () => resolve()));
 }
 async function clickBossActionInPage(tabId, text) {
-  const point = await findBossActionPoint(tabId, text);
-  if (!point.success) return point;
-  const target = { tabId: tabId };
-  let attached = false;
   try {
-    await attachDebugger(target);
-    attached = true;
-    await debuggerCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mouseMoved', x: point.x, y: point.y, button: 'none', clickCount: 0
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      world: 'MAIN',
+      args: [text],
+      func: (expectedText) => {
+        const normalize = (value) => (value || '').replace(/\s+/g, '').trim();
+        const controls = Array.from(document.querySelectorAll('a.op-btn-chat, button, a, [role="button"], [class*="btn"], [class*="button"]'));
+        const button = controls.find((el) => el.offsetParent !== null && normalize(el.textContent).includes(expectedText));
+        if (!button) return { success: false, error: '未找到' + expectedText + '按钮' };
+        const link = button.closest('a[href]');
+        const href = link && link.getAttribute('href');
+        if (link && /^javascript:/i.test(href || '')) link.setAttribute('href', 'javascript:void(0)');
+        button.click();
+        if (link && href) setTimeout(() => link.setAttribute('href', href), 0);
+        return { success: true };
+      }
     });
-    await debuggerCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1, pointerType: 'mouse'
-    });
-    await debuggerCommand(target, 'Input.dispatchMouseEvent', {
-      type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1, pointerType: 'mouse'
-    });
-    return { success: true };
+    return (injected[0] && injected[0].result) || { success: false, error: '页面点击未返回结果' };
   } catch (e) {
-    return { success: false, error: '真实点击失败：' + e.message };
-  } finally {
-    if (attached) await detachDebugger(target);
+    return { success: false, error: '页面点击失败：' + e.message };
   }
 }
 // 第二步是 BOSS 自己的确认弹窗，不会触发 javascript: 导航；沿用原版直接调用按钮处理。
@@ -378,9 +378,9 @@ function isBossJobDetailLink(link) {
 async function ensureTab(url) {
   let tabs = await chrome.tabs.query({ url: '*://*.zhipin.com/*' });
   let tab = tabs[0];
-  // 真实鼠标事件仅对前台标签可靠；投递详情页必须激活后再点击“立即沟通”。
-  if (!tab) tab = await chrome.tabs.create({ url: url, active: true });
-  else tab = await chrome.tabs.update(tab.id, { url: url, active: true });
+  // 后台页面内点击不要求抢占用户正在使用的 Edge 标签。
+  if (!tab) tab = await chrome.tabs.create({ url: url, active: false });
+  else tab = await chrome.tabs.update(tab.id, { url: url });
   // 不可仅检查 complete：复用标签时旧页也可能仍是 complete，导致消息误发给即将进入 BFCache 的旧文档。
   const arrived = await waitForTargetTabReady(tab.id, url, 20000);
   if (!arrived) throw new Error('目标岗位详情页打开超时');
